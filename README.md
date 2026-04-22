@@ -1,5 +1,4 @@
 # Jarvis
-# Jarvis
 🤖 J.A.R.V.I.S — Gesture Master HUD v5.1
 
 Sistema avançado estilo JARVIS inspirado no universo do Homem de Ferro, com:
