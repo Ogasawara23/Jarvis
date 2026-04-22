@@ -24,6 +24,7 @@ Abra o PowerShell e execute:
 pip install mediapipe opencv-python numpy pyautogui
 pip install SpeechRecognition psutil pywin32 pycaw comtypes
 pip install edge-tts pygame
+
 📚 Explicação das bibliotecas
 🖐️ Visão computacional
 mediapipe → Detecta mãos e gestos
