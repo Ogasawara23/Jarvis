@@ -1,34 +1,62 @@
 """
 ╔══════════════════════════════════════════════════════════════════════╗
-║        J.A.R.V.I.S  —  GESTURE MASTER HUD v5.1                     ║
-║  VOZ JARVIS DO FILME  +  Comandos de voz completos                  ║
+║        J.A.R.V.I.S  —  PARTICLE NETWORK  v7.0  (PySide6)           ║
+║  Interface de voz • Rede de partículas azul • Gestos simples        ║
 ╠══════════════════════════════════════════════════════════════════════╣
-║  INSTALAÇÃO COMPLETA:                                                ║
-║    pip install mediapipe opencv-python numpy pyautogui               ║
-║    pip install SpeechRecognition psutil pywin32 pycaw comtypes       ║
-║    pip install edge-tts pygame                                       ║
-║    (edge-tts requer conexão com internet para gerar a voz)           ║
-╠══════════════════════════════════════════════════════════════════════╣
-║  VOZ:                                                                ║
-║    • Motor: Microsoft Edge TTS Neural (GRÁTIS, sem API key)          ║
-║    • Voz: en-GB-RyanNeural  — britânico, grave, formal               ║
-║    • Pitch: -8Hz  Rate: -5%  → soa como o JARVIS do filme            ║
-║    • Cache: respostas comuns pré-geradas para resposta INSTANTÂNEA   ║
-║    • Fala inglês como JARVIS, entende comandos em PT-BR              ║
-╠══════════════════════════════════════════════════════════════════════╣
-║  WAKE WORD: fale "JARVIS" → responde "Yes, sir." imediatamente       ║
-║  COMANDOS PT-BR: após ativar, diga qualquer comando                  ║
+║  pip install mediapipe opencv-python numpy pyautogui                 ║
+║  pip install SpeechRecognition psutil pywin32 pycaw comtypes         ║
+║  pip install edge-tts pygame PySide6                                 ║
 ╚══════════════════════════════════════════════════════════════════════╝
+
+══════════════════════════════════════════════════════════════════════
+  PARÂMETROS FÁCEIS DE AJUSTAR
+══════════════════════════════════════════════════════════════════════
+  Partículas:
+    PARTICLE_COUNT    = quantidade de partículas na rede
+    PARTICLE_SPEED    = velocidade base de movimento
+    CONNECTION_DIST   = distância máxima para conectar partículas
+    PULSE_SPEED       = velocidade do pulso central
+
+  Gestos (MediaPipe):
+    GESTURE_HOLD_FRAMES   = frames consecutivos para confirmar gesto
+    GESTURE_COOLDOWN_SEC  = segundos de espera entre gestos
+    PINCH_THRESHOLD       = distância do pinch (menor = mais fechado)
+    OPEN_PALM_FINGERS     = mínimo de dedos para "mão aberta"
+
+  Cores (modificar no DS):
+    BLUE / BLUE_BRIGHT / BLUE_DIM  — paleta de azul
+══════════════════════════════════════════════════════════════════════
 """
 
-import tkinter as tk
-from tkinter import ttk
-import threading, datetime, os, random, time, subprocess
+# ── Parâmetros ajustáveis ────────────────────────────────────────────
+PARTICLE_COUNT     = 55      # quantidade de partículas
+PARTICLE_SPEED     = 0.30    # velocidade base de movimento
+CONNECTION_DIST    = 130     # distância px para conectar (pseudo-3D projetado)
+PULSE_SPEED        = 0.018   # velocidade do pulso do núcleo
+
+GESTURE_HOLD_FRAMES  = 10    # frames para confirmar um gesto (anti-falso-positivo)
+GESTURE_COOLDOWN_SEC = 1.2   # segundos entre gestos disparados
+PINCH_THRESHOLD      = 0.048 # limiar de pinch (0.03 bem fechado, 0.06 relaxado)
+OPEN_PALM_FINGERS    = 4     # mínimo dedos para mão aberta
+# ────────────────────────────────────────────────────────────────────
+
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton,
+    QLineEdit, QTextEdit, QProgressBar,
+    QHBoxLayout, QVBoxLayout, QGraphicsDropShadowEffect,
+)
+from PySide6.QtCore import Qt, QTimer, Signal, QPointF, QRect
+from PySide6.QtGui import (
+    QFont, QColor, QPalette, QTextCursor, QPixmap, QImage,
+    QPainter, QRadialGradient, QBrush, QPen,
+)
+
+import sys, threading, datetime, os, random, time, subprocess
 import platform, socket, ctypes, queue, math, asyncio
-import tempfile, hashlib, json
+import tempfile, hashlib
 from pathlib import Path
 
-# ── Imports opcionais ───────────────────────────────────────
+# ── Optional imports ─────────────────────────────────────────────────
 try:
     import cv2, mediapipe as mp, numpy as np
     CV2_OK = True
@@ -37,7 +65,7 @@ except: CV2_OK = False
 try:
     import pyautogui
     pyautogui.FAILSAFE = False
-    pyautogui.PAUSE = 0
+    pyautogui.PAUSE    = 0
     AG_OK = True
 except: AG_OK = False
 
@@ -62,223 +90,619 @@ try:
     import webbrowser as wb; WB_OK = True
 except: WB_OK = False
 
-# ═══════════════════════════════════════════════════════════
-# MOTOR DE VOZ  —  JARVIS  (edge-tts  en-GB-RyanNeural)
-# ═══════════════════════════════════════════════════════════
 
-# Diretório de cache de áudio
-CACHE_DIR = Path(tempfile.gettempdir()) / "jarvis_voice_cache"
+# ═══════════════════════════════════════════════════════════
+# DESIGN SYSTEM — Azul tecnológico
+# ═══════════════════════════════════════════════════════════
+class DS:
+    # Fundos
+    BG0 = "#030810"   # fundo abissal
+    BG1 = "#060D1A"   # sidebar
+    BG2 = "#0A1424"   # card
+
+    # Azul — paleta principal
+    BLUE        = "#1A8FFF"   # azul principal
+    BLUE_BRIGHT = "#4DB8FF"   # azul brilhante
+    BLUE_DIM    = "#0A2040"   # azul escuro bg
+    BLUE_MID    = "#0D5099"   # meio
+    BLUE_GLOW   = "#00AAFF"   # glow
+
+    # Ciano complementar
+    CYAN        = "#00D4FF"
+    CYAN_DIM    = "#002A38"
+
+    # Status
+    GREEN  = "#00E5A0"
+    RED    = "#FF3358"
+    YELLOW = "#FFD166"
+    AMBER  = "#FF8C00"
+
+    # Texto
+    T1 = "#D0E8FF"   # primário azulado
+    T2 = "#5A7A99"   # secundário
+    T3 = "#1A3050"   # terciário
+
+    BORDER      = "#0D1E30"
+    BORDER_BLUE = "#0D3060"
+
+    FONT_DISPLAY = "Orbitron, Rajdhani, Consolas, monospace"
+    FONT_MONO    = "JetBrains Mono, Consolas, monospace"
+    FONT_UI      = "Segoe UI, SF Pro Display, system-ui, sans-serif"
+
+
+# ── QSS Global ───────────────────────────────────────────────────────
+GLOBAL_QSS = f"""
+QMainWindow, QWidget {{
+    background: {DS.BG0};
+    color: {DS.T1};
+    font-family: {DS.FONT_UI};
+    font-size: 13px;
+}}
+QScrollBar:vertical {{
+    background: {DS.BG1}; width: 4px; margin: 0; border-radius: 2px;
+}}
+QScrollBar::handle:vertical {{
+    background: {DS.BLUE_DIM}; border-radius: 2px; min-height: 20px;
+}}
+QScrollBar::handle:vertical:hover {{ background: {DS.BLUE_MID}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+QTextEdit {{
+    background: transparent; border: none;
+    color: {DS.T1}; font-family: {DS.FONT_MONO}; font-size: 10px;
+    selection-background-color: {DS.BLUE_DIM};
+}}
+QLineEdit {{
+    background: {DS.BG2}; border: 1px solid {DS.BORDER_BLUE};
+    border-radius: 6px; color: {DS.T1};
+    font-family: {DS.FONT_MONO}; font-size: 12px; padding: 0 10px;
+}}
+QLineEdit:focus {{ border-color: {DS.BLUE}; }}
+QToolTip {{
+    background: {DS.BG2}; border: 1px solid {DS.BORDER_BLUE};
+    color: {DS.T1}; padding: 4px 8px; border-radius: 4px;
+}}
+"""
+
+
+# ═══════════════════════════════════════════════════════════
+# PARTICLE — ponto pseudo-3D da rede
+# ═══════════════════════════════════════════════════════════
+class Particle:
+    """Partícula com posição 3D projetada para 2D."""
+    def __init__(self, cx: float, cy: float, radius: float):
+        self.reset(cx, cy, radius)
+
+    def reset(self, cx: float, cy: float, radius: float):
+        # Posição 3D em coordenadas esféricas
+        theta = random.uniform(0, 2 * math.pi)
+        phi   = random.uniform(0, math.pi)
+        r     = random.uniform(0.3, 1.0) * radius
+
+        self.x3 = r * math.sin(phi) * math.cos(theta)
+        self.y3 = r * math.sin(phi) * math.sin(theta)
+        self.z3 = r * math.cos(phi)
+
+        # Velocidade angular lenta
+        self.vt = random.uniform(-0.003, 0.003) * PARTICLE_SPEED
+        self.vp = random.uniform(-0.002, 0.002) * PARTICLE_SPEED
+        self.vr = 0.0
+
+        self._r0    = r
+        self._theta = theta
+        self._phi   = phi
+        self.alpha  = random.uniform(0.4, 1.0)
+        self.size   = random.uniform(1.5, 3.5)
+
+    def update(self, state: str):
+        speed_mult = {"idle": 0.5, "listening": 1.4, "processing": 2.2, "speaking": 1.0}.get(state, 1.0)
+        self._theta += self.vt * speed_mult
+        self._phi   += self.vp * speed_mult
+        r = self._r0
+
+        self.x3 = r * math.sin(self._phi) * math.cos(self._theta)
+        self.y3 = r * math.sin(self._phi) * math.sin(self._theta)
+        self.z3 = r * math.cos(self._phi)
+
+    def project(self, cx: float, cy: float, fov: float = 400) -> tuple:
+        """Retorna (px, py, scale) com projeção perspectiva."""
+        z = self.z3 + fov
+        if z < 1: z = 1
+        scale = fov / z
+        px = cx + self.x3 * scale
+        py = cy + self.y3 * scale
+        depth = (self.z3 + self._r0) / (2 * self._r0)  # 0..1
+        return px, py, scale, depth
+
+
+# ═══════════════════════════════════════════════════════════
+# NETWORK WIDGET — visualização central de rede de dados
+# ═══════════════════════════════════════════════════════════
+class NetworkWidget(QWidget):
+    """Rede de partículas 3D com conexões — núcleo visual da Jarvis."""
+
+    IDLE       = "idle"
+    LISTENING  = "listening"
+    PROCESSING = "processing"
+    SPEAKING   = "speaking"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(460, 460)
+
+        self._state  = self.IDLE
+        self._pulse  = 0.0
+        self._wave   = 0.0
+        self._angle  = 0.0
+        self._energy = 0.0
+
+        self._particles: list[Particle] = []
+        self._init_particles()
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(20)  # 50fps — bom custo-benefício
+
+    def _init_particles(self):
+        cx = self.width()  / 2
+        cy = self.height() / 2
+        R  = min(cx, cy) * 0.82
+        self._particles = [Particle(cx, cy, R) for _ in range(PARTICLE_COUNT)]
+
+    def set_state(self, state: str):
+        self._state = state
+        self.update()
+
+    def _tick(self):
+        self._pulse = (self._pulse + PULSE_SPEED) % (2 * math.pi)
+        self._wave  = (self._wave  + 0.035)       % (2 * math.pi)
+        self._angle = (self._angle + 0.3)         % 360
+
+        for p in self._particles:
+            p.update(self._state)
+
+        self.update()
+
+    # ── Estado → cor ──────────────────────────────────────────────────
+    def _state_colors(self):
+        s = self._state
+        if s == self.LISTENING:
+            return (
+                QColor(30, 150, 255),    # partícula
+                QColor(20, 120, 220, 90),# conexão
+                QColor(0,  160, 255, 30),# glow outer
+                QColor(60, 180, 255),    # ring
+            )
+        elif s == self.PROCESSING:
+            return (
+                QColor(0,  220, 255),
+                QColor(0,  180, 220, 90),
+                QColor(0,  200, 255, 35),
+                QColor(0,  230, 255),
+            )
+        elif s == self.SPEAKING:
+            return (
+                QColor(80, 190, 255),
+                QColor(40, 150, 240, 100),
+                QColor(50, 170, 255, 40),
+                QColor(100,210,255),
+            )
+        else:  # idle
+            return (
+                QColor(20,  80, 160),
+                QColor(15,  60, 130, 60),
+                QColor(10,  50, 120, 15),
+                QColor(30, 100, 180),
+            )
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w, h   = self.width(), self.height()
+        cx, cy = w / 2.0, h / 2.0
+        R      = min(cx, cy) * 0.82
+        pulse  = math.sin(self._pulse)
+        wave   = self._wave
+
+        c_part, c_conn, c_glow, c_ring = self._state_colors()
+
+        # ── Fundo: glow radial central ────────────────────────────────
+        bg_grad = QRadialGradient(cx, cy, R * 0.9)
+        glow_in = QColor(c_glow); glow_in.setAlpha(int(25 + 15 * abs(pulse)))
+        bg_grad.setColorAt(0.0, glow_in)
+        bg_grad.setColorAt(0.5, QColor(c_glow.red(), c_glow.green(), c_glow.blue(), 8))
+        bg_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.setBrush(QBrush(bg_grad))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QPointF(cx, cy), R * 1.05, R * 1.05)
+
+        # ── Projetar partículas ───────────────────────────────────────
+        projected = []
+        for p in self._particles:
+            px, py, scale, depth = p.project(cx, cy)
+            projected.append((px, py, scale, depth, p))
+
+        # Ordenar por profundidade (z) — as mais atrás primeiro
+        projected.sort(key=lambda x: x[2])
+
+        # ── Conexões ──────────────────────────────────────────────────
+        n = len(projected)
+        for i in range(n):
+            ax, ay, sa, da, pa = projected[i]
+            for j in range(i + 1, n):
+                bx, by, sb, db, pb = projected[j]
+                dist = math.hypot(ax - bx, ay - by)
+                if dist < CONNECTION_DIST:
+                    strength = 1.0 - dist / CONNECTION_DIST
+                    alpha    = int(180 * strength * (da + db) / 2)
+                    if self._state == self.IDLE:
+                        alpha = int(alpha * 0.45)
+                    lc = QColor(c_conn)
+                    lc.setAlpha(max(0, min(255, alpha)))
+                    pen = QPen(lc, max(0.4, strength * 1.4))
+                    painter.setPen(pen)
+                    painter.drawLine(QPointF(ax, ay), QPointF(bx, by))
+
+        # ── Partículas ────────────────────────────────────────────────
+        painter.setPen(Qt.NoPen)
+        for px, py, scale, depth, p in projected:
+            base_alpha = int(220 * depth * p.alpha)
+            if self._state == self.IDLE:
+                base_alpha = int(base_alpha * 0.55)
+
+            sz = p.size * max(0.6, scale * 0.012)
+            sz = max(1.2, min(sz, 5.0))
+
+            # Glow ao redor da partícula
+            g = QRadialGradient(px, py, sz * 3)
+            gc = QColor(c_part); gc.setAlpha(int(base_alpha * 0.35))
+            g.setColorAt(0.0, gc)
+            g.setColorAt(1.0, QColor(0, 0, 0, 0))
+            painter.setBrush(QBrush(g))
+            painter.drawEllipse(QPointF(px, py), sz * 3, sz * 3)
+
+            # Ponto sólido
+            pc = QColor(c_part); pc.setAlpha(base_alpha)
+            painter.setBrush(QBrush(pc))
+            painter.drawEllipse(QPointF(px, py), sz, sz)
+
+        # ── Anéis expansivos ──────────────────────────────────────────
+        n_rings = 3
+        for i in range(n_rings):
+            progress = ((self._pulse / (2 * math.pi)) + i / n_rings) % 1.0
+            ring_r   = R * 0.25 + progress * R * 0.65
+            alpha    = int(100 * (1.0 - progress) * (0.5 + 0.5 * abs(pulse)))
+            if self._state == self.IDLE:
+                alpha = int(alpha * 0.3)
+            rc = QColor(c_ring); rc.setAlpha(alpha)
+            pen = QPen(rc, 0.8)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QPointF(cx, cy), ring_r, ring_r)
+
+        # ── Arco giratório (HUD scanner) ──────────────────────────────
+        arc_r   = R * 0.88
+        arc_pen = QPen(QColor(c_ring))
+        arc_pen.setWidth(1)
+        arc_pen.setCapStyle(Qt.RoundCap)
+        arc_r2  = QColor(c_ring); arc_r2.setAlpha(50)
+        arc_pen.setColor(arc_r2)
+        painter.setPen(arc_pen)
+        painter.setBrush(Qt.NoBrush)
+        arc_rect = QRect(int(cx - arc_r), int(cy - arc_r), int(arc_r * 2), int(arc_r * 2))
+        # Círculo estrutural tênue
+        painter.drawEllipse(QPointF(cx, cy), arc_r, arc_r)
+
+        # Arco brilhante
+        span = 60 if self._state == self.IDLE else 100
+        bright_pen = QPen(QColor(c_ring)); bright_pen.setWidth(2); bright_pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(bright_pen)
+        painter.drawArc(arc_rect, int(-self._angle * 16), span * 16)
+
+        # ── Núcleo central ────────────────────────────────────────────
+        core_r = R * 0.12 + R * 0.025 * abs(pulse)
+        core_g = QRadialGradient(cx, cy, core_r)
+        bright = QColor(c_ring); bright.setAlpha(255)
+        mid    = QColor(c_part); mid.setAlpha(160)
+        edge   = QColor(c_part); edge.setAlpha(20)
+        core_g.setColorAt(0.0, bright)
+        core_g.setColorAt(0.5, mid)
+        core_g.setColorAt(1.0, edge)
+        painter.setBrush(QBrush(core_g))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QPointF(cx, cy), core_r, core_r)
+
+        # Barra de voz radial (estado speaking/listening)
+        if self._state in (self.SPEAKING, self.LISTENING, self.PROCESSING):
+            n_bars   = 48
+            bar_base = R * 0.52
+            bar_max  = R * 0.18
+            for i in range(n_bars):
+                ang   = math.radians(i * (360 / n_bars))
+                phase = i * (2 * math.pi / n_bars)
+                if self._state == self.SPEAKING:
+                    hb = bar_max * (0.2 + 0.8 * abs(math.sin(wave * 3 + phase)))
+                elif self._state == self.PROCESSING:
+                    hb = bar_max * (0.3 + 0.7 * abs(math.sin(wave * 5 + phase * 2)))
+                else:
+                    hb = bar_max * (0.1 + 0.4 * abs(math.sin(wave * 2 + phase)))
+
+                x1 = cx + bar_base * math.cos(ang)
+                y1 = cy + bar_base * math.sin(ang)
+                x2 = cx + (bar_base + hb) * math.cos(ang)
+                y2 = cy + (bar_base + hb) * math.sin(ang)
+
+                ba = int(160 * (hb / bar_max))
+                bc = QColor(c_ring); bc.setAlpha(max(20, ba))
+                bpen = QPen(bc, 1.5, Qt.SolidLine, Qt.RoundCap)
+                painter.setPen(bpen)
+                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+
+        painter.end()
+
+
+# ═══════════════════════════════════════════════════════════
+# SIMPLE GESTURE DETECTOR — gestos simplificados com debounce
+# ═══════════════════════════════════════════════════════════
+class SimpleGestureDetector:
+    """
+    Detecta apenas 3 gestos simples, confiáveis e com cooldown:
+      OPEN_PALM  — mão aberta (≥4 dedos erguidos)  → ativar Jarvis
+      FIST       — punho fechado                    → cancelar/parar
+      PINCH      — polegar+indicador próximos       → confirmar/click
+
+    A mão esquerda muda o modo do cursor (mantida do sistema anterior).
+    """
+
+    OPEN_PALM = "OPEN_PALM"
+    FIST      = "FIST"
+    PINCH     = "PINCH"
+    NONE      = "NONE"
+
+    TIPS = [4, 8, 12, 16, 20]
+
+    def __init__(self):
+        self.ok = CV2_OK
+        if not self.ok: return
+
+        self.hands = mp.solutions.hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,          # apenas 1 mão — mais leve e confiável
+            min_detection_confidence=0.80,
+            min_tracking_confidence=0.75,
+        )
+        self.draw   = mp.solutions.drawing_utils
+        self.cap    = None
+
+        # Estado de debounce
+        self._hold_count     = 0
+        self._hold_gesture   = self.NONE
+        self._last_confirmed = 0.0  # timestamp do último gesto disparado
+        self._last_raw       = self.NONE
+
+    # ── Câmera ───────────────────────────────────────────────────────
+    def start(self) -> bool:
+        if not self.ok: return False
+        self.cap = cv2.VideoCapture(0)
+        return self.cap.isOpened()
+
+    def stop(self):
+        if self.cap: self.cap.release()
+        self.cap = None
+
+    # ── Detecção de dedos ─────────────────────────────────────────────
+    def _count_fingers(self, lm) -> int:
+        count = 0
+        # Polegar (eixo x)
+        if lm[4].x < lm[3].x: count += 1
+        # Demais dedos (eixo y)
+        for tip in self.TIPS[1:]:
+            if lm[tip].y < lm[tip - 2].y: count += 1
+        return count
+
+    def _is_fist(self, lm) -> bool:
+        return sum(1 for t in self.TIPS[1:] if lm[t].y > lm[t - 2].y) >= 4
+
+    def _pinch_dist(self, lm) -> float:
+        return math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y)
+
+    def _classify(self, lm) -> str:
+        if self._is_fist(lm):
+            return self.FIST
+        if self._pinch_dist(lm) < PINCH_THRESHOLD:
+            return self.PINCH
+        if self._count_fingers(lm) >= OPEN_PALM_FINGERS:
+            return self.OPEN_PALM
+        return self.NONE
+
+    # ── Leitura ──────────────────────────────────────────────────────
+    def read(self):
+        """
+        Retorna (frame_bgr, confirmed_gesture, raw_gesture).
+          confirmed_gesture — gesto disparado após debounce (ou NONE)
+          raw_gesture       — gesto detectado no frame atual
+        """
+        if not self.ok or not self.cap:
+            return None, self.NONE, self.NONE
+
+        ret, frame = self.cap.read()
+        if not ret:
+            return None, self.NONE, self.NONE
+
+        frame = cv2.flip(frame, 1)
+        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res   = self.hands.process(rgb)
+
+        raw       = self.NONE
+        confirmed = self.NONE
+
+        if res.multi_hand_landmarks:
+            hlm = res.multi_hand_landmarks[0]
+            lm  = hlm.landmark
+            raw = self._classify(lm)
+
+            # Desenho discreto sobre o frame
+            self.draw.draw_landmarks(
+                frame, hlm, mp.solutions.hands.HAND_CONNECTIONS,
+                self.draw.DrawingSpec(color=(30, 150, 255), thickness=1, circle_radius=3),
+                self.draw.DrawingSpec(color=(10,  80, 160), thickness=1),
+            )
+            # Label do gesto
+            label = {"OPEN_PALM": "OPEN", "FIST": "FIST", "PINCH": "PINCH"}.get(raw, "")
+            if label:
+                cv2.putText(frame, label,
+                    (int(lm[0].x * frame.shape[1]) - 20, int(lm[0].y * frame.shape[0]) - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (30, 180, 255), 1)
+
+            # ── Debounce / hold ───────────────────────────────────────
+            if raw == self._hold_gesture and raw != self.NONE:
+                self._hold_count += 1
+            else:
+                self._hold_gesture = raw
+                self._hold_count   = 1
+
+            now = time.time()
+            if (self._hold_count >= GESTURE_HOLD_FRAMES and
+                    now - self._last_confirmed >= GESTURE_COOLDOWN_SEC and
+                    raw != self.NONE):
+                confirmed            = raw
+                self._last_confirmed = now
+                self._hold_count     = 0  # reset para não disparar duas vezes
+
+        else:
+            self._hold_count   = 0
+            self._hold_gesture = self.NONE
+
+        self._last_raw = raw
+        return frame, confirmed, raw
+
+
+# ═══════════════════════════════════════════════════════════
+# VOICE ENGINE — inalterada
+# ═══════════════════════════════════════════════════════════
+CACHE_DIR    = Path(tempfile.gettempdir()) / "jarvis_voice_cache"
 CACHE_DIR.mkdir(exist_ok=True)
+JARVIS_VOICE = "en-GB-RyanNeural"
+JARVIS_RATE  = "-5%"
+JARVIS_PITCH = "-8Hz"
 
-# Configuração da voz JARVIS
-JARVIS_VOICE  = "en-GB-RyanNeural"   # voz britânica masculina — mais próxima de JARVIS
-JARVIS_RATE   = "-5%"                # ligeiramente mais lento = mais solene
-JARVIS_PITCH  = "-8Hz"              # mais grave = mais autoritário
-
-# Respostas pré-cacheadas (geradas uma vez e reutilizadas instantaneamente)
 PRECACHE_PHRASES = [
-    "Yes, sir.",
-    "Of course, sir.",
-    "Certainly, sir.",
-    "Right away, sir.",
-    "All systems are operational, sir.",
-    "As you wish, sir.",
-    "I understand, sir.",
-    "Camera activated. Gesture control is now online, sir.",
-    "Camera deactivated, sir.",
-    "Gesture control ready. All modules loaded, sir.",
-    "Switching to cursor mode, sir.",
-    "Switching to hotkey mode, sir.",
-    "Switching to volume mode, sir.",
-    "Switching to JARVIS mode, sir.",
-    "Opening Google, sir.",
-    "Opening YouTube, sir.",
-    "Opening Spotify, sir.",
-    "Opening Discord, sir.",
-    "Opening GitHub, sir.",
-    "Opening WhatsApp, sir.",
-    "Opening Netflix, sir.",
-    "Volume increased, sir.",
-    "Volume decreased, sir.",
-    "Audio muted, sir.",
-    "Screenshot captured and saved, sir.",
-    "Locking the workstation, sir.",
-    "Shutting down in five seconds, sir.",
-    "Restarting the system, sir.",
-    "Menu reset, sir.",
-    "Drag initiated, sir.",
-    "Drag released, sir.",
-    "Left click confirmed, sir.",
-    "Double click confirmed, sir.",
-    "Right click confirmed, sir.",
-    "JARVIS Gesture Master online. All modules loaded. Ready for your command, sir.",
+    "Yes, sir.", "Of course, sir.", "Certainly, sir.", "Right away, sir.",
+    "All systems are operational, sir.", "As you wish, sir.", "I understand, sir.",
+    "Camera activated. Gesture control is now online, sir.", "Camera deactivated, sir.",
+    "Opening Google, sir.", "Opening YouTube, sir.", "Opening Spotify, sir.",
+    "Opening Discord, sir.", "Opening GitHub, sir.", "Opening WhatsApp, sir.",
+    "Opening Netflix, sir.", "Volume increased, sir.", "Volume decreased, sir.",
+    "Audio muted, sir.", "Screenshot captured and saved, sir.",
+    "Locking the workstation, sir.", "Shutting down in five seconds, sir.",
+    "Restarting the system, sir.", "Command cancelled, sir.",
+    "Gesture confirmed, sir.", "Listening, sir.",
+    "JARVIS online. All modules loaded. Ready for your command, sir.",
 ]
 
-_voz_q   = queue.Queue()
+_voz_q       = queue.Queue()
 _speak_ready = threading.Event()
 
-def _cache_key(text: str) -> str:
-    return hashlib.md5(text.encode()).hexdigest()
+def _cache_key(t): return hashlib.md5(t.encode()).hexdigest()
+def _cache_path(t): return CACHE_DIR / f"{_cache_key(t)}.mp3"
 
-def _cache_path(text: str) -> Path:
-    return CACHE_DIR / f"{_cache_key(text)}.mp3"
+async def _generate_audio(text, path):
+    c = edge_tts.Communicate(text, JARVIS_VOICE, rate=JARVIS_RATE, pitch=JARVIS_PITCH)
+    await c.save(str(path))
 
-async def _generate_audio(text: str, path: Path):
-    """Gera áudio com edge-tts e salva em arquivo."""
-    communicate = edge_tts.Communicate(
-        text,
-        JARVIS_VOICE,
-        rate=JARVIS_RATE,
-        pitch=JARVIS_PITCH,
-    )
-    await communicate.save(str(path))
-
-def _ensure_cached(text: str) -> Path:
-    """Garante que o áudio está em cache. Gera se necessário."""
+def _ensure_cached(text):
     path = _cache_path(text)
     if not path.exists():
-        try:
-            asyncio.run(_generate_audio(text, path))
-        except Exception as e:
-            return None
+        try: asyncio.run(_generate_audio(text, path))
+        except: return None
     return path
 
 def _precache_worker():
-    """Thread de background que pré-gera todas as frases comuns."""
-    for phrase in PRECACHE_PHRASES:
-        _ensure_cached(phrase)
+    for p in PRECACHE_PHRASES: _ensure_cached(p)
     _speak_ready.set()
 
-def _play_audio(path: Path):
-    """Reproduz um arquivo MP3 com pygame."""
-    if not PG_OK or not path or not path.exists():
-        return
+def _play_audio(path):
+    if not PG_OK or not path or not path.exists(): return
     try:
         pygame.mixer.music.load(str(path))
         pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.05)
-    except Exception:
-        pass
+        while pygame.mixer.music.get_busy(): time.sleep(0.05)
+    except: pass
 
 def _voz_worker():
-    """Worker thread que processa a fila de falas."""
     while True:
         text = _voz_q.get()
         try:
             if EDGE_OK and PG_OK:
                 path = _ensure_cached(text)
-                if path:
-                    _play_audio(path)
-                else:
-                    # fallback para pyttsx3 se edge-tts falhar
-                    _pyttsx3_fallback(text)
-            else:
-                _pyttsx3_fallback(text)
-        except Exception:
-            pass
+                if path: _play_audio(path)
+                else: _pyttsx3_fallback(text)
+            else: _pyttsx3_fallback(text)
+        except: pass
         _voz_q.task_done()
 
-def _pyttsx3_fallback(text: str):
-    """Fallback: usa pyttsx3 se edge-tts não disponível."""
+def _pyttsx3_fallback(text):
     try:
         import pyttsx3
-        e = pyttsx3.init()
-        e.setProperty('rate', 160)
+        e = pyttsx3.init(); e.setProperty('rate', 160)
         for v in e.getProperty('voices'):
-            if 'english' in v.name.lower():
-                e.setProperty('voice', v.id); break
+            if 'english' in v.name.lower(): e.setProperty('voice', v.id); break
         e.say(text); e.runAndWait()
     except: pass
 
-# Inicia o worker de voz
-threading.Thread(target=_voz_worker, daemon=True).start()
-# Pré-cacheia frases em background
+threading.Thread(target=_voz_worker,     daemon=True).start()
 threading.Thread(target=_precache_worker, daemon=True).start()
 
-def speak(text: str, ui=None):
-    """Enfileira texto para ser falado por JARVIS."""
-    if ui:
-        ui.add_log(f"JARVIS › {text}", "jarvis")
+def speak(text, ui=None):
+    if ui: ui.add_log(f"JARVIS › {text}", "jarvis")
     _voz_q.put(text)
 
-# Mapa PT-BR → inglês JARVIS para respostas de wake word / confirmações
 PTBR_TO_EN = {
-    # wake word
-    "jarvis": "Yes, sir.",
-    # confirmações gerais
-    "sim": "Of course, sir.",
-    "ok": "Right away, sir.",
-    "obrigado": "My pleasure, sir.",
-    # apps
-    "abre o google": "Opening Google, sir.",
-    "google": "Opening Google, sir.",
-    "youtube": "Opening YouTube, sir.",
-    "spotify": "Opening Spotify, sir.",
-    "discord": "Opening Discord, sir.",
-    "whatsapp": "Opening WhatsApp, sir.",
-    "netflix": "Opening Netflix, sir.",
-    "github": "Opening GitHub, sir.",
-    "chatgpt": "Opening ChatGPT, sir.",
-    "gmail": "Opening Gmail, sir.",
-    # sistema
+    "jarvis": "Yes, sir.", "sim": "Of course, sir.", "ok": "Right away, sir.",
+    "obrigado": "My pleasure, sir.", "google": "Opening Google, sir.",
+    "youtube": "Opening YouTube, sir.", "spotify": "Opening Spotify, sir.",
+    "discord": "Opening Discord, sir.", "whatsapp": "Opening WhatsApp, sir.",
+    "netflix": "Opening Netflix, sir.", "github": "Opening GitHub, sir.",
+    "chatgpt": "Opening ChatGPT, sir.", "gmail": "Opening Gmail, sir.",
     "status": "Fetching system diagnostics, sir.",
-    "hora": None,          # fala dinâmica
-    "data": None,          # fala dinâmica
     "screenshot": "Screenshot captured and saved to your Pictures folder, sir.",
     "bloqueia": "Locking the workstation, sir.",
     "desliga": "Initiating shutdown sequence in five seconds, sir.",
     "reinicia": "Restarting the system, sir.",
-    # volume
-    "volume": None,        # fala dinâmica
-    # modos
-    "modo cursor": "Switching to cursor mode, sir.",
-    "modo hotkey": "Switching to hotkey mode, sir.",
-    "modo volume": "Switching to volume mode, sir.",
-    "modo jarvis": "Switching to JARVIS mode, sir.",
-    # sair
     "sair": "Shutting down JARVIS. Good day, sir.",
-    "fechar jarvis": "Shutting down JARVIS. Good day, sir.",
 }
 
-def jarvis_response(query_ptbr: str) -> str:
-    """Retorna a resposta JARVIS em inglês para um dado comando."""
-    q = query_ptbr.lower().strip()
+def jarvis_response(q):
+    q = q.lower().strip()
     for key, resp in PTBR_TO_EN.items():
-        if key in q and resp:
-            return resp
-    # fallback respostas genéricas em inglês estilo JARVIS
-    fallbacks = [
-        "Understood, sir.",
-        "Processing your request, sir.",
-        "Command acknowledged, sir.",
-        "Noted, sir.",
-        "I'm on it, sir.",
-        "Affirmative, sir.",
-        "Consider it done, sir.",
-    ]
-    return random.choice(fallbacks)
+        if key in q and resp: return resp
+    return random.choice([
+        "Understood, sir.", "Processing your request, sir.",
+        "Command acknowledged, sir.", "Noted, sir.",
+        "I'm on it, sir.", "Affirmative, sir.", "Consider it done, sir.",
+    ])
+
 
 # ═══════════════════════════════════════════════════════════
-# SISTEMA
+# SYSTEM
 # ═══════════════════════════════════════════════════════════
 def sys_info():
     try:
         cpu  = psutil.cpu_percent(interval=0.2) if PS_OK else 0
-        ram  = psutil.virtual_memory()           if PS_OK else None
-        disk = psutil.disk_usage('/')            if PS_OK else None
-        bat  = psutil.sensors_battery()          if PS_OK else None
+        ram  = psutil.virtual_memory()          if PS_OK else None
+        disk = psutil.disk_usage('/')           if PS_OK else None
+        bat  = psutil.sensors_battery()         if PS_OK else None
         host = socket.gethostname()
         ip   = socket.gethostbyname(host)
         return dict(
             cpu  = f"{cpu:.0f}%",
             ram  = f"{ram.percent:.0f}%" if ram  else "N/A",
             disk = f"{disk.percent:.0f}%" if disk else "N/A",
-            bat  = (f"{bat.percent:.0f}%{'⚡' if bat.power_plugged else '🔋'}") if bat else "N/A",
-            ip   = ip, host=host,
-            os   = f"{platform.system()} {platform.release()}",
+            bat  = (f"{bat.percent:.0f}%{'⚡' if bat.power_plugged else ''}") if bat else "N/A",
+            ip=ip, host=host,
         )
-    except: return {k:"?" for k in ["cpu","ram","disk","bat","ip","host","os"]}
+    except: return {k: "?" for k in ["cpu","ram","disk","bat","ip","host"]}
 
 def vol_ctrl(d):
     try:
@@ -288,326 +712,58 @@ def vol_ctrl(d):
         dev   = AudioUtilities.GetSpeakers()
         iface = dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         vol   = cast(iface, POINTER(IAudioEndpointVolume))
-        if d=='up':   vol.SetMasterVolumeLevel(min(vol.GetMasterVolumeLevel()+2., 0.),None)
-        elif d=='dn': vol.SetMasterVolumeLevel(max(vol.GetMasterVolumeLevel()-2.,-65.25),None)
-        elif d=='mu': vol.SetMute(not vol.GetMute(),None)
+        if d == 'up':  vol.SetMasterVolumeLevel(min(vol.GetMasterVolumeLevel()+2., 0.), None)
+        elif d == 'dn':vol.SetMasterVolumeLevel(max(vol.GetMasterVolumeLevel()-2.,-65.25), None)
+        elif d == 'mu':vol.SetMute(not vol.GetMute(), None)
     except:
         if AG_OK:
-            {'up':lambda:pyautogui.press('volumeup'),
-             'dn':lambda:pyautogui.press('volumedown'),
-             'mu':lambda:pyautogui.press('volumemute')}.get(d,lambda:None)()
-
-# ═══════════════════════════════════════════════════════════
-# MOTOR DE GESTOS
-# ═══════════════════════════════════════════════════════════
-class GestureEngine:
-    TIPS = [4,8,12,16,20]
-
-    def __init__(self):
-        self.ok = CV2_OK
-        if not self.ok: return
-        self.mh    = mp.solutions.hands
-        self.hands = self.mh.Hands(
-            static_image_mode=False, max_num_hands=2,
-            min_detection_confidence=0.75, min_tracking_confidence=0.70)
-        self.draw  = mp.solutions.drawing_utils
-        self.cap   = None
-        self._buf  = {}
-        self.HOLD  = 8
-
-    def _fingers(self, lm):
-        f = [1 if lm[4].x < lm[3].x else 0]
-        for t in self.TIPS[1:]:
-            f.append(1 if lm[t].y < lm[t-2].y else 0)
-        return f
-
-    def _fist(self, lm):
-        return sum(1 for t in self.TIPS[1:] if lm[t].y > lm[t-2].y) >= 4
-
-    def _pinch_dist(self, lm):
-        return math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y)
-
-    def _classify(self, lm):
-        ff    = self._fingers(lm)
-        n     = sum(ff)
-        fist  = self._fist(lm)
-        pinch = self._pinch_dist(lm)
-        is_open = (n == 5)
-        ix,iy = lm[8].x, lm[8].y
-        mx,my = lm[12].x,lm[12].y
-        wx,wy = lm[0].x, lm[0].y
-        if fist:             g = "PUNHO"
-        elif pinch < 0.042:  g = "PINCA"
-        elif is_open:        g = "PALMA"
-        elif n==1 and ff[1]: g = "1_DEDO"
-        elif n==2 and ff[1] and ff[2]: g = "2_DEDOS"
-        elif n==3 and ff[1] and ff[2] and ff[3]: g = "3_DEDOS"
-        elif n==4: g = "4_DEDOS"
-        else:      g = f"{n}_GEN"
-        return dict(g=g,n=n,ff=ff,fist=fist,pinch=pinch,is_open=is_open,
-                    ix=ix,iy=iy,mx=mx,my=my,wx=wx,wy=wy,lm=lm)
-
-    def _confirm(self, hand_id, g_name):
-        key = (hand_id, g_name)
-        for k in list(self._buf):
-            if k[0]==hand_id and k!=key: self._buf[k]=0
-        self._buf[key] = self._buf.get(key,0)+1
-        return self._buf[key]==self.HOLD
-
-    def start(self):
-        if not self.ok: return False
-        self.cap = cv2.VideoCapture(0)
-        return self.cap.isOpened()
-
-    def stop(self):
-        if self.cap: self.cap.release()
-
-    def read(self):
-        if not self.ok or not self.cap: return None,None,None,None,None
-        ret,frame = self.cap.read()
-        if not ret: return None,None,None,None,None
-        frame = cv2.flip(frame,1)
-        rgb   = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-        res   = self.hands.process(rgb)
-        h,w   = frame.shape[:2]
-        right=left=conf_r=conf_l=None
-        if res.multi_hand_landmarks and res.multi_handedness:
-            for hlm,hness in zip(res.multi_hand_landmarks,res.multi_handedness):
-                label = hness.classification[0].label
-                lm    = hlm.landmark
-                data  = self._classify(lm)
-                hid   = 0 if label=='Right' else 1
-                col   = (0,220,255) if label=='Right' else (255,160,0)
-                self.draw.draw_landmarks(frame,hlm,self.mh.HAND_CONNECTIONS,
-                    self.draw.DrawingSpec(color=col,thickness=2,circle_radius=3),
-                    self.draw.DrawingSpec(color=(40,40,180),thickness=2))
-                gx,gy = int(lm[0].x*w),int(lm[0].y*h)
-                cv2.putText(frame,data['g'],(gx-30,gy+20),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.5,col,2)
-                confirmed = self._confirm(hid,data['g'])
-                if label=='Right':
-                    right=data
-                    if confirmed: conf_r=data
-                else:
-                    left=data
-                    if confirmed: conf_l=data
-        cv2.rectangle(frame,(0,0),(w,32),(5,13,26),-1)
-        r_txt=right['g'] if right else "—"
-        l_txt=left['g']  if left  else "—"
-        cv2.putText(frame,f"DIR:{r_txt}  ESQ:{l_txt}",(6,22),
-                    cv2.FONT_HERSHEY_SIMPLEX,0.55,(0,220,255),2)
-        return frame,right,left,conf_r,conf_l
+            {'up': lambda: pyautogui.press('volumeup'),
+             'dn': lambda: pyautogui.press('volumedown'),
+             'mu': lambda: pyautogui.press('volumemute')}.get(d, lambda: None)()
 
 
 # ═══════════════════════════════════════════════════════════
-# GESTURE CONTROLLER
-# ═══════════════════════════════════════════════════════════
-class GestureController:
-    MODES = ["CURSOR","HOTKEY","VOLUME","JARVIS"]
-
-    def __init__(self, ui):
-        self.ui   = ui
-        self.mode = "CURSOR"
-        self._sw,self._sh = (pyautogui.size() if AG_OK else (1920,1080))
-        self._dragging   = False
-        self._scroll_ref = None
-        self._smooth     = None
-        self._SMTH       = 0.30
-        self._last_pinch = 0.0
-        self._open_hold  = 0
-        self.OPEN_THRESH = 14
-
-    def set_mode(self, m):
-        if m in self.MODES:
-            self.mode = m
-            self.ui.add_log(f"◈ MODO → {m}", "gesto")
-            mode_voices = {
-                "CURSOR": "Switching to cursor mode, sir.",
-                "HOTKEY": "Switching to hotkey mode, sir.",
-                "VOLUME": "Switching to volume mode, sir.",
-                "JARVIS": "Switching to JARVIS mode, sir.",
-            }
-            speak(mode_voices.get(m,"Mode changed, sir."), self.ui)
-            self.ui.root.after(0, lambda: self.ui.highlight_mode(m))
-
-    def _scr(self,nx,ny):
-        M=0.12
-        return int(max(0.,min(1.,(nx-M)/(1-2*M)))*self._sw), \
-               int(max(0.,min(1.,(ny-M)/(1-2*M)))*self._sh)
-
-    def _mv(self,nx,ny):
-        tx,ty=self._scr(nx,ny)
-        if self._smooth is None: self._smooth=(tx,ty)
-        cx,cy=self._smooth
-        S=self._SMTH
-        nx2=max(0,min(self._sw-1,int(cx+(tx-cx)*S*2)))
-        ny2=max(0,min(self._sh-1,int(cy+(ty-cy)*S*2)))
-        self._smooth=(nx2,ny2)
-        return nx2,ny2
-
-    def _cursor(self,right,left,cr,cl):
-        if not AG_OK or right is None: return
-        g=right['g']
-        if g=="1_DEDO":
-            x,y=self._mv(right['ix'],right['iy'])
-            pyautogui.moveTo(x,y,_pause=False)
-            if self._dragging:
-                pyautogui.mouseUp(button='left',_pause=False)
-                self._dragging=False
-            self._scroll_ref=None; self._open_hold=0
-        elif g=="2_DEDOS":
-            my=right['my']
-            if self._scroll_ref is None: self._scroll_ref=my
-            else:
-                dy=(self._scroll_ref-my)*25
-                if abs(dy)>0.25:
-                    pyautogui.scroll(int(dy),_pause=False)
-                    self._scroll_ref=my
-        elif g=="PUNHO":
-            x,y=self._mv(right['wx'],right['wy'])
-            if not self._dragging:
-                pyautogui.mouseDown(button='left',_pause=False)
-                self._dragging=True
-                self.ui.add_log("✊ ARRASTAR — iniciado","gesto")
-                speak("Drag initiated, sir.",self.ui)
-            pyautogui.moveTo(x,y,_pause=False)
-            self._scroll_ref=None
-        elif g=="PALMA":
-            self._open_hold+=1
-            if self._open_hold==self.OPEN_THRESH:
-                pyautogui.rightClick(_pause=False)
-                self.ui.add_log("✋ CLIQUE DIREITO","gesto")
-                speak("Right click confirmed, sir.",self.ui)
-        else:
-            self._open_hold=0
-        if g!="PUNHO" and self._dragging:
-            pyautogui.mouseUp(button='left',_pause=False)
-            self._dragging=False
-            self.ui.add_log("✊ ARRASTAR — solto","gesto")
-            speak("Drag released, sir.",self.ui)
-        if cr and cr['g']=="PINCA":
-            now=time.time()
-            if now-self._last_pinch<0.40:
-                pyautogui.doubleClick(_pause=False)
-                self.ui.add_log("🤌 DUPLO CLIQUE","gesto")
-                speak("Double click confirmed, sir.",self.ui)
-            else:
-                pyautogui.click(_pause=False)
-                self.ui.add_log("🤌 CLIQUE","gesto")
-                speak("Left click confirmed, sir.",self.ui)
-            self._last_pinch=now
-
-    def _hotkey(self,right,left,cr,cl):
-        if not AG_OK or cr is None: return
-        g=cr['g']
-        actions={
-            "1_DEDO":  (('alt','tab'),  "Switching windows, sir."),
-            "2_DEDOS": (('win','d'),    "Showing the desktop, sir."),
-            "3_DEDOS": (('win','tab'),  "Opening task view, sir."),
-            "PALMA":   (('win','left'), "Snapping window to the left, sir."),
-            "PUNHO":   (('alt','f4'),   "Closing the active window, sir."),
-        }
-        if g=="4_DEDOS":
-            try:
-                p=os.path.join(Path.home(),"Pictures",
-                    f"jarvis_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-                pyautogui.screenshot(p)
-                self.ui.add_log(f"📸 Screenshot → {p}","gesto")
-                speak("Screenshot captured and saved, sir.",self.ui)
-            except Exception as e:
-                self.ui.add_log(f"⚠ {e}","erro")
-        elif g in actions:
-            keys,msg=actions[g]
-            pyautogui.hotkey(*keys,_pause=False)
-            self.ui.add_log(f"⌨ {g}","gesto")
-            speak(msg,self.ui)
-
-    def _volume(self,right,left,cr,cl):
-        if right and left:
-            dist=math.hypot(right['ix']-left['ix'],right['iy']-left['iy'])
-            pct=int(max(0.,min(1.,(dist-0.05)/0.70))*100)
-            self.ui.root.after(0,lambda p=pct:self.ui.vol_var.set(p))
-        if cr:
-            if cr['g']=="1_DEDO":  vol_ctrl('up'); self.ui.add_log("🔊 Volume +","gesto"); speak("Volume increased, sir.",self.ui)
-            elif cr['g']=="PUNHO": vol_ctrl('mu'); self.ui.add_log("🔇 Mute","gesto");    speak("Audio muted, sir.",self.ui)
-        if right and right['g']=="2_DEDOS": vol_ctrl('dn'); self.ui.add_log("🔉 Volume -","gesto")
-
-    def _jarvis(self,right,left,cr,cl):
-        if cr is None: return
-        g=cr['g']
-        if   g=="1_DEDO":  self.ui.root.after(0,self.ui.menu_up)
-        elif g=="2_DEDOS": self.ui.root.after(0,self.ui.menu_down)
-        elif g=="3_DEDOS": self.ui.root.after(0,self.ui.menu_confirm)
-        elif g=="PALMA":
-            self.ui.menu_idx=0
-            self.ui.root.after(0,self.ui.refresh_menu)
-            speak("Menu reset, sir.",self.ui)
-        elif g=="PUNHO":
-            for _ in range(3): self.ui.root.after(0,self.ui.menu_down)
-
-    def process(self,right,left,cr,cl):
-        if cl:
-            g=cl['g']
-            m={"1_DEDO":"CURSOR","2_DEDOS":"HOTKEY","3_DEDOS":"VOLUME","PALMA":"JARVIS"}.get(g)
-            if m: self.set_mode(m)
-        if   self.mode=="CURSOR": self._cursor(right,left,cr,cl)
-        elif self.mode=="HOTKEY": self._hotkey(right,left,cr,cl)
-        elif self.mode=="VOLUME": self._volume(right,left,cr,cl)
-        elif self.mode=="JARVIS": self._jarvis(right,left,cr,cl)
-
-
-# ═══════════════════════════════════════════════════════════
-# HANDLER DE COMANDOS
+# COMMAND HANDLER — inalterado
 # ═══════════════════════════════════════════════════════════
 SITES = {
-    "youtube":  ("https://youtube.com",          "YouTube"),
-    "google":   ("https://google.com",           "Google"),
-    "github":   ("https://github.com",           "GitHub"),
-    "chatgpt":  ("https://chat.openai.com",      "ChatGPT"),
-    "gmail":    ("https://mail.google.com",       "Gmail"),
-    "whatsapp": ("https://web.whatsapp.com",      "WhatsApp"),
-    "netflix":  ("https://netflix.com",           "Netflix"),
-    "twitch":   ("https://twitch.tv",             "Twitch"),
-    "reddit":   ("https://reddit.com",            "Reddit"),
-    "linkedin": ("https://linkedin.com",          "LinkedIn"),
+    "youtube":  ("https://youtube.com", "YouTube"),
+    "google":   ("https://google.com",  "Google"),
+    "github":   ("https://github.com",  "GitHub"),
+    "chatgpt":  ("https://chat.openai.com","ChatGPT"),
+    "gmail":    ("https://mail.google.com","Gmail"),
+    "whatsapp": ("https://web.whatsapp.com","WhatsApp"),
+    "netflix":  ("https://netflix.com", "Netflix"),
+    "twitch":   ("https://twitch.tv",   "Twitch"),
+    "reddit":   ("https://reddit.com",  "Reddit"),
+    "linkedin": ("https://linkedin.com","LinkedIn"),
 }
+
+MENU_ITEMS = [
+    ("Google","google"),("YouTube","youtube"),("Spotify","spotify"),
+    ("WhatsApp","whatsapp"),("VS Code","vs code"),("Status","status"),
+    ("Discord","discord"),("Hora","hora"),("Screenshot","screenshot"),("Sair","sair"),
+]
 
 def cmd(query, ui):
     q = query.lower().strip()
     if not q: return
-
-    # ── HORA / DATA ──────────────────────────────────────
     if "hora" in q or "que horas" in q:
-        agora = datetime.datetime.now().strftime('%H:%M')
-        speak(f"The current time is {agora}, sir.", ui); return
+        speak(f"The current time is {datetime.datetime.now().strftime('%H:%M')}, sir.", ui); return
     if "data" in q or "hoje" in q:
-        d = datetime.datetime.now()
-        speak(f"Today is {d.strftime('%A, %B %d, %Y')}, sir.", ui); return
-
-    # ── STATUS ───────────────────────────────────────────
-    if "status" in q or "sistema" in q or "diagnóstico" in q:
+        speak(f"Today is {datetime.datetime.now().strftime('%A, %B %d, %Y')}, sir.", ui); return
+    if "status" in q or "sistema" in q:
         i = sys_info()
-        speak(f"System diagnostics: CPU at {i['cpu']}, RAM at {i['ram']}. "
-              f"All systems nominal, sir.", ui)
+        speak(f"CPU at {i['cpu']}, RAM at {i['ram']}. All systems nominal, sir.", ui)
         ui.update_stats(i); return
-
-    # ── MODOS ────────────────────────────────────────────
-    for m in ["cursor","hotkey","volume","jarvis"]:
-        if f"modo {m}" in q: ui.controller.set_mode(m.upper()); return
-
-    # ── SISTEMA ──────────────────────────────────────────
     if "desliga" in q:
-        speak("Initiating shutdown sequence. Five seconds, sir.", ui)
+        speak("Initiating shutdown. Five seconds, sir.", ui)
         time.sleep(5); os.system("shutdown /s /t 1"); return
     if "reinicia" in q:
-        speak("Restarting the system, sir.", ui)
-        os.system("shutdown /r /t 3"); return
+        speak("Restarting, sir.", ui); os.system("shutdown /r /t 3"); return
     if "bloqueia" in q or "trava" in q:
         speak("Locking the workstation, sir.", ui)
         try: ctypes.windll.user32.LockWorkStation()
         except: pass; return
-
-    # ── VOLUME ───────────────────────────────────────────
     if "volume" in q:
         if any(x in q for x in ["aumenta","sobe","mais","cima"]):
             vol_ctrl('up'); speak("Volume increased, sir.", ui)
@@ -616,665 +772,655 @@ def cmd(query, ui):
         elif any(x in q for x in ["muta","silencia","mudo"]):
             vol_ctrl('mu'); speak("Audio muted, sir.", ui)
         return
-
-    # ── SITES WEB ────────────────────────────────────────
-    for k,(url,name) in SITES.items():
+    for k, (url, name) in SITES.items():
         if k in q:
             frase = q.replace(k,"").replace("abre","").replace("pesquisa","").strip()
             full  = url
-            if frase and k=="youtube":
-                full = f"https://www.youtube.com/results?search_query={frase.replace(' ','+')}"
-            elif frase and k=="google":
-                full = f"https://www.google.com/search?q={frase.replace(' ','+')}"
+            if frase and k == "youtube": full = f"https://www.youtube.com/results?search_query={frase.replace(' ','+')}"
+            elif frase and k == "google": full = f"https://www.google.com/search?q={frase.replace(' ','+')}"
             if WB_OK: wb.open(full)
             speak(f"Opening {name}, sir.", ui); return
-
-    # ── SPOTIFY ──────────────────────────────────────────
     if "spotify" in q:
         try: os.startfile("spotify:")
         except:
             if WB_OK: wb.open("https://open.spotify.com")
         speak("Opening Spotify, sir.", ui); return
-
-    # ── APPS LOCAIS ──────────────────────────────────────
     local_apps = {
-        "discord":       os.path.expandvars(r"%LOCALAPPDATA%\Discord\Update.exe"),
-        "notepad":       "notepad.exe",
-        "bloco de notas":"notepad.exe",
-        "calculadora":   "calc.exe",
-        "paint":         "mspaint.exe",
-        "explorer":      "explorer.exe",
-        "vs code":       os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-        "vscode":        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-        "gerenciador":   "taskmgr.exe",
+        "discord":    os.path.expandvars(r"%LOCALAPPDATA%\Discord\Update.exe"),
+        "notepad":    "notepad.exe", "bloco de notas": "notepad.exe",
+        "calculadora":"calc.exe",    "paint": "mspaint.exe",
+        "explorer":   "explorer.exe","gerenciador": "taskmgr.exe",
+        "vs code":    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+        "vscode":     os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
     }
-    for k,exe in local_apps.items():
+    for k, exe in local_apps.items():
         if k in q:
             try: subprocess.Popen([exe])
             except: pass
             speak(f"Launching {k}, sir.", ui); return
-
-    # ── SCREENSHOT ───────────────────────────────────────
     if "screenshot" in q or "print" in q or "captura" in q:
         if AG_OK:
             try:
-                p=os.path.join(Path.home(),"Pictures",
+                p = os.path.join(Path.home(),"Pictures",
                     f"jarvis_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
                 pyautogui.screenshot(p)
-                speak("Screenshot captured and saved to your Pictures folder, sir.", ui)
-                ui.add_log(f"📸 {p}","info")
+                speak("Screenshot captured, sir.", ui)
+                ui.add_log(f"📸 {p}", "info")
             except: speak("Unable to capture screenshot, sir.", ui)
         return
-
-    # ── TIMER ────────────────────────────────────────────
-    if "timer" in q or "alarme" in q or "cronômetro" in q:
+    if "timer" in q or "alarme" in q:
         nums = [int(s) for s in q.split() if s.isdigit()]
         if nums:
             secs = nums[0]*60 if "minuto" in q else nums[0]
-            unit = "minutes" if "minuto" in q else "seconds"
-            speak(f"Timer set for {nums[0]} {unit}, sir.", ui)
-            def _t():
-                time.sleep(secs)
-                speak("Your timer has elapsed, sir.", ui)
-            threading.Thread(target=_t,daemon=True).start()
-        else:
-            speak("Please specify the timer duration, sir.", ui)
+            speak(f"Timer set for {nums[0]} {'minutes' if 'minuto' in q else 'seconds'}, sir.", ui)
+            def _t(): time.sleep(secs); speak("Your timer has elapsed, sir.", ui)
+            threading.Thread(target=_t, daemon=True).start()
+        else: speak("Please specify the timer duration, sir.", ui)
         return
-
-    # ── IP ───────────────────────────────────────────────
-    if "meu ip" in q or "qual meu ip" in q:
-        try:
-            ip=socket.gethostbyname(socket.gethostname())
-            speak(f"Your local IP address is {ip}, sir.", ui)
-        except: speak("Unable to retrieve IP address, sir.", ui)
+    if "meu ip" in q:
+        try: speak(f"Your IP is {socket.gethostbyname(socket.gethostname())}, sir.", ui)
+        except: speak("Unable to retrieve IP, sir.", ui)
         return
-
-    # ── SAIR ─────────────────────────────────────────────
     if "sair" in q or "fechar jarvis" in q or "encerra" in q:
         speak("Shutting down JARVIS. It has been a pleasure, sir.", ui)
-        time.sleep(2); ui.root.destroy(); return
-
-    # ── FALLBACK IA ──────────────────────────────────────
+        time.sleep(2); QApplication.quit(); return
     speak(jarvis_response(q), ui)
 
 
 # ═══════════════════════════════════════════════════════════
-# RECONHECIMENTO DE VOZ  (PT-BR → responde em inglês)
+# VOICE RECOGNITION — inalterado
 # ═══════════════════════════════════════════════════════════
 def listen_loop(ui):
-    if not SR_OK:
-        ui.add_log("⚠ SpeechRecognition não instalado.", "erro"); return
-
+    if not SR_OK: ui.add_log("SpeechRecognition não instalado.", "erro"); return
     r = sr.Recognizer()
-    r.energy_threshold       = 300
+    r.energy_threshold      = 300
     r.dynamic_energy_threshold = True
-    r.pause_threshold        = 0.6   # detecta fim de fala mais rápido
-
-    ativo    = False
-    t_ativo  = 0
-    cooldown = 0.0   # evita eco da própria voz
-
-    ui.add_log("🎙 Microfone ativo. Diga 'JARVIS' para ativar.", "info")
+    r.pause_threshold       = 0.6
+    ativo = False; t_ativo = 0; cooldown = 0.0
+    ui.add_log("Microfone pronto. Diga 'JARVIS' para ativar.", "info")
 
     while True:
         try:
-            # Não escuta enquanto JARVIS está falando (evita eco)
-            if pygame.mixer.music.get_busy() if PG_OK else False:
-                time.sleep(0.1); continue
-            if time.time() < cooldown:
-                time.sleep(0.1); continue
-
+            if PG_OK and pygame.mixer.music.get_busy():
+                ui.sig_state.emit("speaking"); time.sleep(0.1); continue
+            else:
+                ui.sig_state.emit("listening" if ativo else "idle")
+            if time.time() < cooldown: time.sleep(0.1); continue
             with sr.Microphone() as src:
                 r.adjust_for_ambient_noise(src, duration=0.2)
                 audio = r.listen(src, timeout=4, phrase_time_limit=8)
-
-            q = r.recognize_google(audio, language="pt-BR").lower()
-            ui.add_log(f"VOCÊ › {q}", "user")
+            q   = r.recognize_google(audio, language="pt-BR").lower()
             now = time.time()
-
-            # ── WAKE WORD ─────────────────────────────────
+            ui.add_log(f"YOU › {q}", "user")
             if "jarvis" in q:
-                ativo   = True
-                t_ativo = now
-                ui.add_log("⚡ WAKE WORD detectada!", "alerta")
-                speak("Yes, sir.", ui)
-                cooldown = time.time() + 2.5  # espera a voz terminar
-                continue
-
-            # ── COMANDO (dentro da janela ativa) ──────────
+                ativo = True; t_ativo = now
+                ui.add_log("WAKE WORD", "alerta")
+                ui.sig_state.emit("listening")
+                speak("Yes, sir.", ui); cooldown = now + 2.5; continue
             if ativo and (now - t_ativo < 15):
-                # Fala o reconhecimento da intenção ANTES de executar
-                en_resp = jarvis_response(q)
-                speak(en_resp, ui)
-                cooldown = time.time() + 2.0
+                ui.sig_state.emit("processing")
+                speak(jarvis_response(q), ui); cooldown = now + 2.0
                 threading.Thread(target=cmd, args=(q, ui), daemon=True).start()
-                t_ativo = time.time()
-            else:
-                ativo = False
-
-        except sr.WaitTimeoutError:
-            pass
-        except sr.UnknownValueError:
-            pass
-        except Exception:
-            pass
+                t_ativo = now
+            else: ativo = False
+        except (sr.WaitTimeoutError, sr.UnknownValueError): pass
+        except: pass
 
 
 # ═══════════════════════════════════════════════════════════
-# CALCULADORA WIDGET
+# MAIN WINDOW
 # ═══════════════════════════════════════════════════════════
-class CalcWidget(tk.Frame):
-    BG="#050d1a"; AC="#00c8ff"; AC2="#003d52"; TX="#90d8f0"; DIM="#1a3040"
-    FM=("Consolas",8); FB=("Consolas",8,"bold")
+class JarvisUI(QMainWindow):
 
-    def __init__(self, parent, **kw):
-        super().__init__(parent,bg=self.BG,highlightbackground=self.AC2,highlightthickness=1,**kw)
-        self._e=tk.StringVar(value=""); self._r=tk.StringVar(value="0")
-        tk.Label(self,text="◈ CALC",fg=self.AC,bg=self.BG,font=self.FB).pack(anchor="w",padx=6,pady=(4,1))
-        disp=tk.Frame(self,bg=self.AC2); disp.pack(fill="x",padx=4)
-        tk.Label(disp,textvariable=self._e,fg=self.DIM,bg=self.BG,font=self.FM,anchor="e").pack(fill="x",padx=3)
-        tk.Label(disp,textvariable=self._r,fg=self.AC,bg=self.BG,font=("Consolas",13,"bold"),anchor="e").pack(fill="x",padx=3)
-        p=tk.Frame(self,bg=self.BG); p.pack(padx=4,pady=(2,4))
-        for ri,row in enumerate([["C","←","%","÷"],["7","8","9","×"],["4","5","6","−"],["1","2","3","+"],[" ","0",".","="]]):
-            for ci,k in enumerate(row):
-                tk.Button(p,text=k,width=3,height=1,
-                          bg=self.AC2 if k=="=" else self.BG,
-                          fg=self.AC  if k in "÷×−+=C←%" else self.TX,
-                          font=self.FB,activebackground=self.AC2,relief="flat",
-                          highlightbackground=self.DIM,highlightthickness=1,cursor="hand2",
-                          command=lambda l=k:self._press(l)).grid(row=ri,column=ci,padx=1,pady=1)
-        self._b=""
-
-    def _press(self,k):
-        b=self._b
-        if k=="C": b=""; self._r.set("0"); self._e.set("")
-        elif k=="←": b=b[:-1]
-        elif k=="=":
-            if b:
-                try:
-                    rv=eval(b.replace("÷","/").replace("×","*").replace("−","-"),{"__builtins__":{}},{})
-                    if isinstance(rv,float) and rv.is_integer(): rv=int(rv)
-                    self._e.set(b+" ="); self._r.set(str(rv)); b=str(rv)
-                except ZeroDivisionError: self._r.set("÷0"); b=""
-                except: self._r.set("ERR"); b=""
-        elif k==" ": return
-        else: b+=k
-        self._b=b
-        if k not in("=","C"): self._r.set(b or "0")
-
-
-# ═══════════════════════════════════════════════════════════
-# INTERFACE PRINCIPAL
-# ═══════════════════════════════════════════════════════════
-class JarvisUI:
-    BG    = "#020a14"; PANEL  = "#050d1a"; PANEL2 = "#071220"
-    AC    = "#00ccff"; AC2    = "#003d52"; AC3    = "#001e2a"
-    TX    = "#8ad4e8"; DIM    = "#1a3040"; DIM2   = "#0d2030"
-    GREEN = "#00e87a"; RED    = "#ff2244"; YELLOW = "#ffcc00"
-    ORANGE= "#ff8800"; PURPLE = "#aa44ff"; CYAN2  = "#00ffee"
-    F     = ("Consolas",10); FT=("Consolas",22,"bold")
-    FS    = ("Consolas",8);  FB=("Consolas",9,"bold")
-
-    ATALHOS = {
-        "🌐  WEB": [
-            ("Google","google","#0066cc"),("YouTube","youtube","#cc0000"),
-            ("GitHub","github","#6e40c9"),("Gmail","gmail","#d44638"),
-            ("ChatGPT","chatgpt","#10a37f"),("WhatsApp","whatsapp","#25d366"),
-            ("Reddit","reddit","#ff4500"),("LinkedIn","linkedin","#0077b5"),
-            ("Netflix","netflix","#e50914"),("Twitch","twitch","#9146ff"),
-        ],
-        "🎵  MÍDIA": [
-            ("Spotify","spotify","#1db954"),("YT Music","youtube music","#ff0000"),
-            ("SoundCloud","soundcloud","#ff5500"),("Deezer","deezer","#a238ff"),
-        ],
-        "💻  APPS": [
-            ("VS Code","vs code","#007acc"),("Calculadora","calculadora","#00a86b"),
-            ("Notepad","notepad","#555555"),("Paint","paint","#dc143c"),
-            ("Discord","discord","#5865f2"),("Explorer","explorer","#f0a500"),
-            ("Task Mgr","gerenciador","#cc4400"),
-        ],
-        "⚙️  SISTEMA": [
-            ("Status PC","status","#00ccff"),("Screenshot","screenshot","#00ffcc"),
-            ("Hora","hora","#ffcc00"),("Data","data","#ff9900"),
-            ("Volume +",lambda:vol_ctrl('up'),"#00cc77"),
-            ("Volume -",lambda:vol_ctrl('dn'),"#cc7700"),
-            ("Mute",lambda:vol_ctrl('mu'),"#cc0044"),
-            ("Bloquear","bloqueia","#ff3300"),
-        ],
-        "🎮  JOGOS": [
-            ("Steam","steam","#1b2838"),("Valorant","valorant","#ff4655"),
-            ("Minecraft","minecraft","#5a8a2a"),("Epic","epic","#2563eb"),
-        ],
-    }
-
-    MENU_ITEMS = [
-        ("Google","google"),("YouTube","youtube"),("Spotify","spotify"),
-        ("WhatsApp","whatsapp"),("VS Code","vs code"),("Status","status"),
-        ("Discord","discord"),("Hora","hora"),("Screenshot","screenshot"),("Sair","sair"),
-    ]
+    sig_log     = Signal(str, str)
+    sig_volume  = Signal(int)
+    sig_stats   = Signal(dict)
+    sig_cam_img = Signal(object)
+    sig_gesture = Signal(str, str)  # (confirmed, raw)
+    sig_state   = Signal(str)
 
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("J.A.R.V.I.S  —  Gesture Master HUD v5.1")
-        self.root.geometry("1440x860")
-        self.root.resizable(True,True)
-        self.root.configure(bg=self.BG)
-        self.root.minsize(1100,700)
+        super().__init__()
+        self.setWindowTitle("J.A.R.V.I.S  ·  v7.0")
+        self.resize(1080, 700)
+        self.setMinimumSize(860, 560)
+        self.setStyleSheet(GLOBAL_QSS)
 
         self.menu_idx  = 0
         self._cam_on   = False
-        self._ge       = GestureEngine()
-        self.controller= GestureController(self)
+        self._detector = SimpleGestureDetector()
 
-        self._build()
-        self._clock_tick()
-        self._stats_tick()
+        self._build_ui()
+        self._connect_signals()
+
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._clock_tick)
+        self._clock_timer.start(1000)
+
+        self._stats_timer = QTimer(self)
+        self._stats_timer.timeout.connect(self._stats_tick)
+        self._stats_timer.start(8000)
 
         threading.Thread(target=listen_loop, args=(self,), daemon=True).start()
 
-    # ════════════════════════════════════════════════════
-    def _build(self):
-        self._build_header(); self._build_modebar()
-        self._build_body();   self._build_statusbar()
+    def _connect_signals(self):
+        self.sig_log.connect(self._append_log)
+        self.sig_volume.connect(self._vol_bar.setValue)
+        self.sig_stats.connect(self._apply_stats)
+        self.sig_cam_img.connect(self._update_cam_pixmap)
+        self.sig_gesture.connect(self._on_gesture)
+        self.sig_state.connect(self._on_state)
 
-    # ── HEADER ──────────────────────────────────────────
-    def _build_header(self):
-        h=tk.Frame(self.root,bg=self.BG); h.pack(fill="x",padx=14,pady=(8,0))
-        tk.Label(h,text="J.A.R.V.I.S",fg=self.AC,bg=self.BG,font=self.FT).pack(side="left")
-        tk.Label(h,text=" Gesture Master HUD v5.1  —  JARVIS Voice",fg=self.DIM,
-                 bg=self.BG,font=("Consolas",8)).pack(side="left",pady=(10,0))
-        self.lbl_clock=tk.Label(h,text="",fg=self.AC,bg=self.BG,font=("Consolas",20,"bold"))
-        self.lbl_clock.pack(side="right")
-        self.lbl_date=tk.Label(h,text="",fg=self.DIM,bg=self.BG,font=self.FS)
-        self.lbl_date.pack(side="right",padx=10)
-        tk.Frame(self.root,bg=self.AC2,height=1).pack(fill="x",padx=14,pady=(3,2))
+    # ─────────────────────────────────────────────────────────────────
+    def _build_ui(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        main = QHBoxLayout(root)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+        main.addWidget(self._build_sidebar(), 0)
+        main.addWidget(self._build_stage(),   1)
 
-    # ── BARRA MODOS ─────────────────────────────────────
-    def _build_modebar(self):
-        mb=tk.Frame(self.root,bg=self.BG); mb.pack(fill="x",padx=14,pady=(0,3))
-        tk.Label(mb,text="MODO:",fg=self.DIM,bg=self.BG,font=("Consolas",8)).pack(side="left",padx=(2,6))
-        mode_def={"CURSOR":(self.AC,""),"HOTKEY":(self.YELLOW,""),"VOLUME":(self.GREEN,""),"JARVIS":(self.PURPLE,"")}
-        self._mode_frames={}
-        for m,(color,_) in mode_def.items():
-            f=tk.Frame(mb,bg=self.DIM2,padx=1,pady=1); f.pack(side="left",padx=2)
-            lbl=tk.Label(f,text=f"  {m}  ",bg=self.PANEL,fg=self.DIM,
-                         font=("Consolas",9,"bold"),cursor="hand2"); lbl.pack()
-            lbl.bind("<Button-1>",lambda e,mo=m:self.controller.set_mode(mo))
-            lbl.bind("<Enter>",lambda e,l=lbl,c=color:l.config(fg=c))
-            lbl.bind("<Leave>",lambda e,l=lbl,mo=m:l.config(fg=self.AC if mo==self.controller.mode else self.DIM))
-            self._mode_frames[m]=(f,lbl,color)
+    # ─────────────────────────────────────────────────────────────────
+    # SIDEBAR
+    # ─────────────────────────────────────────────────────────────────
+    def _build_sidebar(self):
+        panel = QWidget()
+        panel.setFixedWidth(260)
+        panel.setStyleSheet(f"background:{DS.BG1}; border-right:1px solid {DS.BORDER_BLUE};")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Indicador de voz / gesto
-        self._gesto_var=tk.StringVar(value="GESTO: —")
-        tk.Label(mb,textvariable=self._gesto_var,fg=self.ORANGE,bg=self.BG,
-                 font=("Consolas",11,"bold")).pack(side="right",padx=14)
+        # Header
+        hdr = QWidget()
+        hdr.setFixedHeight(52)
+        hdr.setStyleSheet(f"background:{DS.BG0}; border-bottom:1px solid {DS.BORDER_BLUE};")
+        hl = QHBoxLayout(hdr)
+        hl.setContentsMargins(16, 0, 16, 0)
+        logo = QLabel("J.A.R.V.I.S")
+        logo.setStyleSheet(f"""
+            color: {DS.BLUE_BRIGHT}; font-family: {DS.FONT_DISPLAY};
+            font-size: 13px; font-weight: 700; letter-spacing: 3px; background: transparent;
+        """)
+        hl.addWidget(logo); hl.addStretch()
+        ver = QLabel("v7.0")
+        ver.setStyleSheet(f"color:{DS.T3}; font-size:10px; background:transparent;")
+        hl.addWidget(ver)
+        layout.addWidget(hdr)
 
-        # Indicador de voz JARVIS
-        self._voice_var=tk.StringVar(value="🎙 VOZ: JARVIS (en-GB)")
-        self._voice_lbl=tk.Label(mb,textvariable=self._voice_var,fg=self.GREEN,bg=self.BG,
-                                  font=("Consolas",8))
-        self._voice_lbl.pack(side="right",padx=8)
+        # Câmera
+        cam_w = QWidget()
+        cam_w.setStyleSheet("background:transparent;")
+        cv  = QVBoxLayout(cam_w)
+        cv.setContentsMargins(12, 12, 12, 8)
+        cv.setSpacing(8)
 
-        # Barra volume
-        self.vol_var=tk.IntVar(value=50)
-        vf=tk.Frame(mb,bg=self.BG); vf.pack(side="right",padx=8)
-        tk.Label(vf,text="VOL",fg=self.DIM,bg=self.BG,font=self.FS).pack(side="left")
-        ttk.Progressbar(vf,variable=self.vol_var,maximum=100,length=70,mode='determinate').pack(side="left",padx=4)
-        self.highlight_mode("CURSOR")
-        tk.Frame(self.root,bg=self.AC2,height=1).pack(fill="x",padx=14,pady=(0,3))
+        ch = QHBoxLayout()
+        cl = QLabel("CÂMERA  /  GESTOS")
+        cl.setStyleSheet(f"color:{DS.T3}; font-size:9px; font-weight:700; letter-spacing:2px; background:transparent;")
+        ch.addWidget(cl); ch.addStretch()
+        self._cam_st = QLabel("● offline")
+        self._cam_st.setStyleSheet(f"color:{DS.RED}; font-size:10px; font-weight:600; background:transparent;")
+        ch.addWidget(self._cam_st)
+        cv.addLayout(ch)
 
-    # ── CORPO ────────────────────────────────────────────
-    def _build_body(self):
-        body=tk.Frame(self.root,bg=self.BG); body.pack(fill="both",expand=True,padx=14)
-        body.columnconfigure(0,weight=2); body.columnconfigure(1,weight=2); body.columnconfigure(2,weight=3)
-        body.rowconfigure(0,weight=1)
-        self._build_cam_panel(body)
-        self._build_log_panel(body)
-        self._build_shortcuts_panel(body)
+        self._cam_lbl = QLabel("Câmera inativa")
+        self._cam_lbl.setAlignment(Qt.AlignCenter)
+        self._cam_lbl.setFixedHeight(150)
+        self._cam_lbl.setStyleSheet(f"""
+            background:{DS.BG0}; color:{DS.T3}; font-size:11px;
+            border:1px solid {DS.BORDER_BLUE}; border-radius:8px;
+        """)
+        cv.addWidget(self._cam_lbl)
 
-    # ── CÂMERA ───────────────────────────────────────────
-    def _build_cam_panel(self, parent):
-        col=tk.Frame(parent,bg=self.BG); col.grid(row=0,column=0,sticky="nsew",padx=(0,5))
-        col.rowconfigure(0,weight=3); col.rowconfigure(1,weight=1); col.rowconfigure(2,weight=1)
-        col.columnconfigure(0,weight=1)
-
-        cf=tk.Frame(col,bg=self.PANEL,highlightbackground=self.AC2,highlightthickness=1)
-        cf.grid(row=0,column=0,sticky="nsew",pady=(0,4))
-        cam_hdr=tk.Frame(cf,bg=self.PANEL); cam_hdr.pack(fill="x",padx=8,pady=(5,2))
-        tk.Label(cam_hdr,text="◈  CÂMERA",fg=self.AC,bg=self.PANEL,font=self.FB).pack(side="left")
-        self._cam_st=tk.StringVar(value="● OFF")
-        self._cam_st_lbl=tk.Label(cam_hdr,textvariable=self._cam_st,fg=self.RED,bg=self.PANEL,font=self.FS)
-        self._cam_st_lbl.pack(side="right")
-        self._cam_lbl=tk.Label(cf,bg="#000000",
-                                text="[ CÂMERA DESLIGADA ]\n\nClique ATIVAR para iniciar\nreconhecimento gestual",
-                                fg=self.DIM,font=("Consolas",10))
-        self._cam_lbl.pack(fill="both",expand=True,padx=6,pady=4)
-        ctrl=tk.Frame(cf,bg=self.PANEL); ctrl.pack(fill="x",padx=8,pady=(0,6))
-        self._cam_btn=tk.Button(ctrl,text="  ▶  ATIVAR  ",bg=self.AC2,fg=self.AC,font=self.FB,
-                                 relief="flat",cursor="hand2",
-                                 activebackground=self.AC,activeforeground=self.BG,
-                                 command=self._toggle_cam)
-        self._cam_btn.pack(side="left",ipady=3)
-        tk.Label(ctrl,text="Smooth:",fg=self.DIM,bg=self.PANEL,font=self.FS).pack(side="left",padx=(8,2))
-        self._sm_var=tk.DoubleVar(value=0.30)
-        tk.Scale(ctrl,from_=0.05,to=1.0,resolution=0.05,variable=self._sm_var,
-                 orient="horizontal",length=70,bg=self.PANEL,fg=self.AC,troughcolor=self.DIM,
-                 highlightthickness=0,showvalue=False,
-                 command=lambda v:setattr(self.controller,'_SMTH',float(v))).pack(side="left")
+        # Feedback de gesto
+        self._gesture_chip = QLabel("—")
+        self._gesture_chip.setAlignment(Qt.AlignCenter)
+        self._gesture_chip.setFixedHeight(28)
+        self._gesture_chip.setStyleSheet(f"""
+            color:{DS.BLUE}; font-family:{DS.FONT_MONO}; font-size:10px; font-weight:700;
+            background:{DS.BLUE_DIM}; border:1px solid {DS.BORDER_BLUE};
+            border-radius:6px; letter-spacing:1.5px;
+        """)
+        cv.addWidget(self._gesture_chip)
 
         # Referência de gestos
-        leg=tk.Frame(col,bg=self.PANEL,highlightbackground=self.AC2,highlightthickness=1)
-        leg.grid(row=1,column=0,sticky="nsew",pady=(0,4))
-        tk.Label(leg,text="◈  REFERÊNCIA RÁPIDA",fg=self.AC,bg=self.PANEL,font=self.FB).pack(anchor="w",padx=8,pady=(5,2))
-        ref_data=[
-            ("CURSOR",self.AC,[("1 dedo","mover cursor"),("✌ 2 dedos","scroll"),
-                                ("punho+mv","arrastar janela"),("pinça","clique"),
-                                ("palma 0.7s","clique direito")]),
-            ("HOTKEY",self.YELLOW,[("1 dedo","Alt+Tab"),("2 dedos","Win+D"),
-                                    ("3 dedos","Win+Tab"),("4 dedos","screenshot"),
-                                    ("punho","Alt+F4"),("palma","snap janela")]),
-            ("VOLUME",self.GREEN,[("2 mãos dist","volume"),("1 dedo dir","vol +"),("punho dir","mute")]),
-            ("JARVIS",self.PURPLE,[("1↑","subir"),("2↓","descer"),("3","confirmar"),("palma","reset")]),
-            ("TROCA",self.ORANGE,[("esq 1","CURSOR"),("esq 2","HOTKEY"),("esq 3","VOLUME"),("esq palma","JARVIS")]),
-        ]
-        ref_txt=tk.Text(leg,bg=self.PANEL,fg=self.TX,font=("Consolas",7),relief="flat",wrap="word")
-        ref_txt.pack(fill="both",expand=True,padx=6,pady=(0,5))
-        ref_txt.tag_config("g",foreground=self.ORANGE); ref_txt.tag_config("a",foreground=self.GREEN)
-        for mname,col_m,items in ref_data:
-            ref_txt.insert("end",f"[{mname}]\n"); ref_txt.tag_add(mname,ref_txt.index("end-2l"),ref_txt.index("end-1l"))
-            ref_txt.tag_config(mname,foreground=col_m,font=("Consolas",8,"bold"))
-            for g,a in items:
-                ref_txt.insert("end",f"  {g} ","g"); ref_txt.insert("end",f"→ {a}\n","a")
-        ref_txt.config(state="disabled")
+        ref = QLabel("✋ mão aberta → ativar\n✊ punho → cancelar\n🤏 pinch → confirmar")
+        ref.setStyleSheet(f"""
+            color:{DS.T3}; font-size:10px; background:transparent;
+            line-height: 1.6; padding: 2px 0;
+        """)
+        cv.addWidget(ref)
 
-        # Menu gestual
-        mf=tk.Frame(col,bg=self.PANEL,highlightbackground=self.AC2,highlightthickness=1)
-        mf.grid(row=2,column=0,sticky="nsew")
-        tk.Label(mf,text="◈  MENU GESTUAL  (modo JARVIS)",fg=self.AC,bg=self.PANEL,font=self.FB).pack(anchor="w",padx=8,pady=(5,2))
-        tk.Label(mf,text="1↑  2↓  3=confirmar  palma=reset",fg=self.DIM,bg=self.PANEL,font=("Consolas",7)).pack(anchor="w",padx=8)
-        mf2=tk.Frame(mf,bg=self.PANEL); mf2.pack(fill="both",expand=True,padx=6,pady=(2,5))
-        self._menu_btns=[]
-        COLS=2
-        for idx,(label,mc) in enumerate(self.MENU_ITEMS):
-            r2,c2=divmod(idx,COLS)
-            btn=tk.Button(mf2,text=label,bg=self.PANEL,fg=self.TX,font=("Consolas",8),
-                           relief="flat",cursor="hand2",activebackground=self.AC2,
-                           activeforeground=self.AC,anchor="w",
-                           command=lambda x=mc:self._run(x))
-            btn.grid(row=r2,column=c2,padx=2,pady=1,sticky="ew")
-            mf2.columnconfigure(c2,weight=1)
-            self._menu_btns.append(btn)
-        self.refresh_menu()
+        self._cam_btn = QPushButton("▶  Ativar Câmera")
+        self._cam_btn.setFixedHeight(28)
+        self._cam_btn.setStyleSheet(f"""
+            QPushButton {{
+                background:{DS.BLUE_DIM}; color:{DS.BLUE}; border:1px solid {DS.BORDER_BLUE};
+                border-radius:6px; font-size:11px; font-weight:600;
+            }}
+            QPushButton:hover {{ background:{DS.BLUE_MID}22; border-color:{DS.BLUE}; }}
+        """)
+        self._cam_btn.setCursor(Qt.PointingHandCursor)
+        self._cam_btn.clicked.connect(self._toggle_cam)
+        cv.addWidget(self._cam_btn)
+        layout.addWidget(cam_w)
 
-    # ── LOG ──────────────────────────────────────────────
-    def _build_log_panel(self, parent):
-        col=tk.Frame(parent,bg=self.BG); col.grid(row=0,column=1,sticky="nsew",padx=(0,5))
-        col.rowconfigure(0,weight=1); col.columnconfigure(0,weight=1)
-        lf=tk.Frame(col,bg=self.PANEL,highlightbackground=self.AC2,highlightthickness=1)
-        lf.grid(row=0,column=0,sticky="nsew")
-        hdr=tk.Frame(lf,bg=self.PANEL); hdr.pack(fill="x",padx=8,pady=(6,2))
-        tk.Label(hdr,text="◈  LOG DE COMUNICAÇÕES",fg=self.AC,bg=self.PANEL,font=self.FB).pack(side="left")
-        tk.Button(hdr,text="limpar",bg=self.PANEL,fg=self.DIM,font=self.FS,relief="flat",cursor="hand2",
-                  command=lambda:(self.log.config(state="normal"),self.log.delete("1.0","end"),self.log.config(state="disabled"))
-                  ).pack(side="right")
-        self.log=tk.Text(lf,bg=self.PANEL,fg=self.TX,font=("Consolas",10),
-                          insertbackground=self.AC,relief="flat",wrap="word",selectbackground=self.AC2)
-        self.log.pack(fill="both",expand=True,padx=6,pady=(0,4))
-        for tag,color in [("jarvis",self.AC),("user",self.GREEN),("gesto",self.ORANGE),
-                           ("alerta",self.YELLOW),("erro",self.RED),("info",self.DIM)]:
-            self.log.tag_config(tag,foreground=color)
-        self.log.config(state="disabled")
-        inp=tk.Frame(lf,bg=self.PANEL); inp.pack(fill="x",padx=6,pady=(0,6))
-        tk.Label(inp,text="›",fg=self.AC,bg=self.PANEL,font=("Consolas",14,"bold")).pack(side="left",padx=(0,4))
-        self.entry=tk.Entry(inp,bg=self.AC3,fg=self.AC,insertbackground=self.AC,
-                             font=("Consolas",10),relief="flat",highlightbackground=self.AC2,highlightthickness=1)
-        self.entry.pack(side="left",fill="x",expand=True,ipady=4)
-        self.entry.bind("<Return>",self._send)
-        tk.Button(inp,text="SEND",bg=self.AC2,fg=self.AC,font=self.FB,relief="flat",cursor="hand2",
-                  padx=8,activebackground=self.AC,activeforeground=self.BG,command=self._send
-                  ).pack(side="left",padx=(4,0),ipady=4)
+        # Sep
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet(f"background:{DS.BORDER_BLUE}; border:none;"); sep.setFixedHeight(1)
+        layout.addWidget(sep)
 
-    # ── PAINEL ATALHOS ───────────────────────────────────
-    def _build_shortcuts_panel(self, parent):
-        outer=tk.Frame(parent,bg=self.BG); outer.grid(row=0,column=2,sticky="nsew")
-        outer.rowconfigure(0,weight=1); outer.columnconfigure(0,weight=1)
-        cv=tk.Canvas(outer,bg=self.BG,highlightthickness=0,bd=0)
-        sb=tk.Scrollbar(outer,orient="vertical",command=cv.yview,bg=self.BG,troughcolor=self.DIM2)
-        cv.configure(yscrollcommand=sb.set)
-        sb.pack(side="right",fill="y"); cv.pack(side="left",fill="both",expand=True)
-        inner=tk.Frame(cv,bg=self.BG)
-        cw=cv.create_window((0,0),window=inner,anchor="nw")
-        inner.bind("<Configure>",lambda e:cv.configure(scrollregion=cv.bbox("all")))
-        cv.bind("<Configure>",lambda e:cv.itemconfig(cw,width=e.width))
-        cv.bind_all("<MouseWheel>",lambda e:cv.yview_scroll(int(-1*(e.delta/120)),"units"))
+        # Log
+        lw = QWidget(); lw.setStyleSheet("background:transparent;")
+        lv = QVBoxLayout(lw); lv.setContentsMargins(12, 8, 12, 0); lv.setSpacing(6)
+        lh = QHBoxLayout()
+        lt = QLabel("LOG")
+        lt.setStyleSheet(f"color:{DS.T3}; font-size:9px; font-weight:700; letter-spacing:2px; background:transparent;")
+        lh.addWidget(lt); lh.addStretch()
+        cb = QPushButton("limpar")
+        cb.setStyleSheet(f"background:transparent; color:{DS.T3}; border:none; font-size:9px;")
+        cb.setCursor(Qt.PointingHandCursor)
+        cb.clicked.connect(lambda: self._log.clear())
+        lh.addWidget(cb)
+        lv.addLayout(lh)
+        self._log = QTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setStyleSheet(f"background:transparent; color:{DS.T2}; font-family:{DS.FONT_MONO}; font-size:10px; border:none;")
+        lv.addWidget(self._log, 1)
+        layout.addWidget(lw, 1)
 
-        # ─ Painel de voz JARVIS ─
-        vp=tk.Frame(inner,bg=self.PANEL,highlightbackground=self.PURPLE,highlightthickness=1)
-        vp.pack(fill="x",pady=(0,5))
-        tk.Label(vp,text="◈  VOZ JARVIS",fg=self.PURPLE,bg=self.PANEL,font=self.FB).pack(anchor="w",padx=8,pady=(5,2))
-        vp_inner=tk.Frame(vp,bg=self.PANEL); vp_inner.pack(fill="x",padx=8,pady=(0,6))
-        voice_info=[
-            ("Motor:",  "Microsoft Edge Neural TTS"),
-            ("Voz:",    "en-GB-RyanNeural"),
-            ("Estilo:", "Britânico formal — JARVIS"),
-            ("Pitch:",  f"{JARVIS_PITCH}  Rate: {JARVIS_RATE}"),
-            ("Wake:",   "Diga 'JARVIS' para ativar"),
-            ("Cache:",  f"{len(PRECACHE_PHRASES)} frases pré-geradas"),
-        ]
-        for lbl,val in voice_info:
-            row=tk.Frame(vp_inner,bg=self.PANEL); row.pack(fill="x",pady=1)
-            tk.Label(row,text=lbl,fg=self.DIM,bg=self.PANEL,font=("Consolas",7),width=8,anchor="w").pack(side="left")
-            tk.Label(row,text=val,fg=self.PURPLE,bg=self.PANEL,font=("Consolas",7),anchor="w").pack(side="left")
+        # Input
+        iw = QWidget()
+        iw.setStyleSheet(f"background:{DS.BG0}; border-top:1px solid {DS.BORDER_BLUE};")
+        iv = QVBoxLayout(iw); iv.setContentsMargins(12, 10, 12, 12); iv.setSpacing(0)
+        ir = QHBoxLayout(); ir.setSpacing(6)
+        pr = QLabel("›")
+        pr.setFixedWidth(14)
+        pr.setStyleSheet(f"color:{DS.BLUE}; font-family:{DS.FONT_MONO}; font-size:14px; font-weight:700; background:transparent;")
+        ir.addWidget(pr)
+        self._entry = QLineEdit()
+        self._entry.setPlaceholderText("Digite um comando…")
+        self._entry.setFixedHeight(30)
+        self._entry.returnPressed.connect(self._send)
+        ir.addWidget(self._entry, 1)
+        sb = QPushButton("→")
+        sb.setFixedSize(30, 30)
+        sb.setStyleSheet(f"""
+            QPushButton {{
+                background:{DS.BLUE_DIM}; color:{DS.BLUE}; border:1px solid {DS.BORDER_BLUE};
+                border-radius:6px; font-size:13px; font-weight:700;
+            }}
+            QPushButton:hover {{ background:{DS.BLUE_MID}33; border-color:{DS.BLUE}; }}
+        """)
+        sb.setCursor(Qt.PointingHandCursor)
+        sb.clicked.connect(self._send)
+        ir.addWidget(sb)
+        iv.addLayout(ir)
+        layout.addWidget(iw)
 
-        # Botão testar voz
-        tk.Button(vp, text="▶  TESTAR VOZ JARVIS",
-                  bg=self.DIM2, fg=self.PURPLE, font=("Consolas",8,"bold"),
-                  relief="flat", cursor="hand2",
-                  activebackground=self.PURPLE, activeforeground=self.BG,
-                  command=lambda: threading.Thread(
-                      target=speak, args=("All systems are operational, sir. JARVIS online.", self),
-                      daemon=True).start()
-                  ).pack(fill="x", padx=8, pady=(0,6))
+        return panel
 
-        # ─ Stats ─
-        sf=tk.Frame(inner,bg=self.PANEL,highlightbackground=self.AC2,highlightthickness=1)
-        sf.pack(fill="x",pady=(0,5))
-        tk.Label(sf,text="◈  STATUS DO SISTEMA",fg=self.AC,bg=self.PANEL,font=self.FB).pack(anchor="w",padx=8,pady=(5,2))
-        self.stat_vars={}
-        sg=tk.Frame(sf,bg=self.PANEL); sg.pack(fill="x",padx=8,pady=(0,5))
-        for i,(lbl,key) in enumerate([("CPU","cpu"),("RAM","ram"),("DISCO","disk"),("BAT","bat"),("IP","ip")]):
-            r2,c2=divmod(i,2)
-            f2=tk.Frame(sg,bg=self.DIM2); f2.grid(row=r2,column=c2,padx=2,pady=2,sticky="ew")
-            sg.columnconfigure(c2,weight=1)
-            tk.Label(f2,text=lbl,fg=self.DIM,bg=self.DIM2,font=("Consolas",7)).pack(anchor="w",padx=4,pady=(2,0))
-            var=tk.StringVar(value="…")
-            tk.Label(f2,textvariable=var,fg=self.AC,bg=self.DIM2,font=("Consolas",9,"bold")).pack(anchor="w",padx=4,pady=(0,2))
-            self.stat_vars[key]=var
+    # ─────────────────────────────────────────────────────────────────
+    # STAGE — área principal de voz
+    # ─────────────────────────────────────────────────────────────────
+    def _build_stage(self):
+        stage = QWidget(); stage.setStyleSheet(f"background:{DS.BG0};")
+        layout = QVBoxLayout(stage)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        CalcWidget(inner).pack(fill="x",pady=(0,5))
-        for cat,items in self.ATALHOS.items():
-            self._build_category(inner,cat,items)
+        layout.addWidget(self._build_top_bar())
 
-    def _build_category(self, parent, cat_name, items):
-        sec=tk.Frame(parent,bg=self.PANEL,highlightbackground=self.AC2,highlightthickness=1)
-        sec.pack(fill="x",pady=(0,5))
-        hdr=tk.Frame(sec,bg=self.AC2,cursor="hand2"); hdr.pack(fill="x")
-        lbl=tk.Label(hdr,text=cat_name,fg=self.AC,bg=self.AC2,font=self.FB); lbl.pack(side="left",padx=8,pady=4)
-        arr=tk.Label(hdr,text="▲",fg=self.DIM,bg=self.AC2,font=("Consolas",8)); arr.pack(side="right",padx=8)
-        gf=tk.Frame(sec,bg=self.PANEL); gf.pack(fill="x",padx=6,pady=4)
-        expanded=[True]
-        COLS=3
-        for idx,(name,action,color) in enumerate(items):
-            r2,c2=divmod(idx,COLS)
-            fn=action if callable(action) else lambda a=action:self._run(a)
-            btn=tk.Button(gf,text=name,bg=self.DIM2,fg=self.TX,font=("Consolas",8),
-                           relief="flat",cursor="hand2",anchor="w",pady=3,
-                           activebackground=color,activeforeground="#ffffff",command=fn)
-            btn.grid(row=r2,column=c2,padx=2,pady=2,sticky="ew")
-            gf.columnconfigure(c2,weight=1)
-            btn.bind("<Enter>",lambda e,b=btn,cl=color:b.config(bg=cl,fg="#ffffff"))
-            btn.bind("<Leave>",lambda e,b=btn:b.config(bg=self.DIM2,fg=self.TX))
-        def toggle(_=None):
-            if expanded[0]: gf.pack_forget(); arr.config(text="▼"); expanded[0]=False
-            else:            gf.pack(fill="x",padx=6,pady=4); arr.config(text="▲"); expanded[0]=True
-        for w in (hdr,lbl,arr): w.bind("<Button-1>",toggle)
+        # Centro
+        center = QWidget(); center.setStyleSheet("background:transparent;")
+        cl = QVBoxLayout(center)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.setAlignment(Qt.AlignCenter)
 
-    # ── STATUS BAR ───────────────────────────────────────
-    def _build_statusbar(self):
-        tk.Frame(self.root,bg=self.AC2,height=1).pack(fill="x",padx=14,pady=(3,0))
-        sb=tk.Frame(self.root,bg=self.BG); sb.pack(fill="x",padx=14,pady=(2,4))
-        self._status_var=tk.StringVar(value="◉  SISTEMA ONLINE  |  CÂMERA INATIVA")
-        tk.Label(sb,textvariable=self._status_var,fg=self.GREEN,bg=self.BG,font=("Consolas",8)).pack(side="left")
-        quick_kb=[
-            ("Alt+Tab",lambda:AG_OK and pyautogui.hotkey('alt','tab')),
-            ("Win+D",  lambda:AG_OK and pyautogui.hotkey('win','d')),
-            ("Win+L",  lambda:ctypes.windll.user32.LockWorkStation()),
-            ("Vol+",   lambda:vol_ctrl('up')),("Vol-",lambda:vol_ctrl('dn')),
-            ("Mute",   lambda:vol_ctrl('mu')),
-            ("Print",  lambda:AG_OK and pyautogui.press('printscreen')),
-        ]
-        for label,fn in quick_kb:
-            b=tk.Button(sb,text=label,bg=self.DIM2,fg=self.DIM,font=("Consolas",7),
-                        relief="flat",cursor="hand2",padx=5,
-                        activebackground=self.AC2,activeforeground=self.AC,
-                        command=lambda f=fn:threading.Thread(target=f,daemon=True).start())
-            b.pack(side="right",padx=1,ipady=2)
-            b.bind("<Enter>",lambda e,btn=b:btn.config(fg=self.AC))
-            b.bind("<Leave>",lambda e,btn=b:btn.config(fg=self.DIM))
+        cl.addStretch()
 
-    # ════════════════════════════════════════════════════
-    # CÂMERA LOOP
-    # ════════════════════════════════════════════════════
+        # Network widget
+        nr = QHBoxLayout(); nr.setAlignment(Qt.AlignCenter)
+        self._net = NetworkWidget()
+        nr.addWidget(self._net)
+        cl.addLayout(nr)
+
+        cl.addSpacing(20)
+
+        # Status
+        self._status_lbl = QLabel("AGUARDANDO COMANDO")
+        self._status_lbl.setAlignment(Qt.AlignCenter)
+        self._status_lbl.setStyleSheet(f"""
+            color:{DS.BLUE_BRIGHT}; font-family:{DS.FONT_DISPLAY};
+            font-size:12px; font-weight:700; letter-spacing:5px; background:transparent;
+        """)
+        cl.addWidget(self._status_lbl)
+
+        cl.addSpacing(6)
+
+        self._sub_lbl = QLabel("Diga 'JARVIS' para ativar")
+        self._sub_lbl.setAlignment(Qt.AlignCenter)
+        self._sub_lbl.setStyleSheet(f"color:{DS.T3}; font-family:{DS.FONT_MONO}; font-size:11px; letter-spacing:1px; background:transparent;")
+        cl.addWidget(self._sub_lbl)
+
+        cl.addStretch()
+
+        layout.addWidget(center, 1)
+        layout.addWidget(self._build_bottom_bar())
+
+        return stage
+
+    # ─────────────────────────────────────────────────────────────────
+    def _build_top_bar(self):
+        bar = QWidget(); bar.setFixedHeight(46)
+        bar.setStyleSheet(f"background:{DS.BG1}; border-bottom:1px solid {DS.BORDER_BLUE};")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(16)
+
+        self._clock_lbl = QLabel("00:00:00")
+        self._clock_lbl.setStyleSheet(f"""
+            color:{DS.BLUE_BRIGHT}; font-family:{DS.FONT_DISPLAY};
+            font-size:15px; font-weight:700; letter-spacing:2px; background:transparent;
+        """)
+        layout.addWidget(self._clock_lbl)
+
+        self._date_lbl = QLabel("")
+        self._date_lbl.setStyleSheet(f"color:{DS.T3}; font-size:10px; background:transparent; letter-spacing:1px;")
+        layout.addWidget(self._date_lbl)
+
+        layout.addStretch()
+
+        # Volume
+        vr = QHBoxLayout(); vr.setSpacing(6)
+        vl = QLabel("VOL")
+        vl.setStyleSheet(f"color:{DS.T3}; font-size:9px; font-weight:700; letter-spacing:1px; background:transparent;")
+        vr.addWidget(vl)
+        self._vol_bar = QProgressBar()
+        self._vol_bar.setRange(0, 100); self._vol_bar.setValue(50)
+        self._vol_bar.setFixedSize(60, 3); self._vol_bar.setTextVisible(False)
+        self._vol_bar.setStyleSheet(f"""
+            QProgressBar {{ background:{DS.BG0}; border:none; border-radius:2px; }}
+            QProgressBar::chunk {{ background:{DS.BLUE}; border-radius:2px; }}
+        """)
+        vr.addWidget(self._vol_bar)
+        layout.addLayout(vr)
+
+        mic = QPushButton("🎙")
+        mic.setFixedSize(32, 32)
+        mic.setToolTip("Microfone ativo — diga 'JARVIS'")
+        mic.setStyleSheet(f"""
+            QPushButton {{
+                background:{DS.BLUE_DIM}; color:{DS.BLUE}; border:1px solid {DS.BORDER_BLUE};
+                border-radius:16px; font-size:13px;
+            }}
+            QPushButton:hover {{ background:{DS.BLUE_MID}44; border-color:{DS.BLUE}; }}
+        """)
+        mic.setCursor(Qt.PointingHandCursor)
+        mic.clicked.connect(lambda: speak("Yes, sir.", self))
+        layout.addWidget(mic)
+
+        return bar
+
+    def _build_bottom_bar(self):
+        bar = QWidget(); bar.setFixedHeight(40)
+        bar.setStyleSheet(f"background:{DS.BG1}; border-top:1px solid {DS.BORDER_BLUE};")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(0)
+
+        self._sb_dot = QLabel("●")
+        self._sb_dot.setStyleSheet(f"color:{DS.GREEN}; font-size:8px; background:transparent;")
+        layout.addWidget(self._sb_dot)
+        self._sb_lbl = QLabel("  Sistema online")
+        self._sb_lbl.setStyleSheet(f"color:{DS.T3}; font-size:10px; background:transparent;")
+        layout.addWidget(self._sb_lbl)
+
+        layout.addStretch()
+
+        self._stat_labels = {}
+        for i, (k, key) in enumerate([("CPU","cpu"),("RAM","ram"),("DISCO","disk"),("BAT","bat")]):
+            if i > 0:
+                sep = QLabel("|"); sep.setStyleSheet(f"color:{DS.BORDER_BLUE}; background:transparent; padding: 0 8px;")
+                layout.addWidget(sep)
+            rw = QHBoxLayout(); rw.setSpacing(4)
+            kl = QLabel(k); kl.setStyleSheet(f"color:{DS.T3}; font-size:9px; font-weight:700; letter-spacing:1px; background:transparent;")
+            rw.addWidget(kl)
+            vl = QLabel("—"); vl.setStyleSheet(f"color:{DS.BLUE}; font-family:{DS.FONT_MONO}; font-size:10px; font-weight:700; background:transparent;")
+            rw.addWidget(vl)
+            self._stat_labels[key] = vl
+            layout.addLayout(rw)
+
+        return bar
+
+    # ═════════════════════════════════════════════════════════════════
+    # ESTADO / GESTO
+    # ═════════════════════════════════════════════════════════════════
+    def _on_state(self, state: str):
+        self._net.set_state(state)
+        cfg = {
+            "idle":       ("AGUARDANDO COMANDO",   "Diga 'JARVIS' para ativar",  DS.BLUE_BRIGHT),
+            "listening":  ("OUVINDO",               "Escutando você…",            DS.CYAN),
+            "processing": ("PROCESSANDO",           "Analisando comando…",        DS.BLUE),
+            "speaking":   ("RESPONDENDO",           "JARVIS falando…",            DS.BLUE_BRIGHT),
+        }.get(state, ("AGUARDANDO COMANDO", "Diga 'JARVIS' para ativar", DS.BLUE_BRIGHT))
+
+        main_txt, sub_txt, color = cfg
+        self._status_lbl.setText(main_txt)
+        self._status_lbl.setStyleSheet(f"""
+            color:{color}; font-family:{DS.FONT_DISPLAY};
+            font-size:12px; font-weight:700; letter-spacing:5px; background:transparent;
+        """)
+        self._sub_lbl.setText(sub_txt)
+
+    def _on_gesture(self, confirmed: str, raw: str):
+        """Processa gesto confirmado e atualiza chip visual."""
+        label_map = {
+            SimpleGestureDetector.OPEN_PALM: "✋  MÃO ABERTA",
+            SimpleGestureDetector.FIST:      "✊  PUNHO",
+            SimpleGestureDetector.PINCH:     "🤏  PINCH",
+        }
+        # Chip visual (mostra raw para feedback imediato)
+        raw_label = label_map.get(raw, "—")
+        self._gesture_chip.setText(raw_label if raw != SimpleGestureDetector.NONE else "—")
+
+        if not confirmed or confirmed == SimpleGestureDetector.NONE:
+            return
+
+        # ── Ações por gesto confirmado ─────────────────────────────────
+        if confirmed == SimpleGestureDetector.OPEN_PALM:
+            # Ativar / chamar atenção
+            self.add_log("Gesto: MÃO ABERTA → ativando Jarvis", "gesto")
+            speak("Listening, sir.", self)
+            self.sig_state.emit("listening")
+
+        elif confirmed == SimpleGestureDetector.FIST:
+            # Cancelar / parar fala
+            self.add_log("Gesto: PUNHO → cancelar", "gesto")
+            if PG_OK:
+                try: pygame.mixer.music.stop()
+                except: pass
+            speak("Command cancelled, sir.", self)
+
+        elif confirmed == SimpleGestureDetector.PINCH:
+            # Confirmar último item do menu
+            self.add_log("Gesto: PINCH → confirmar", "gesto")
+            self.menu_confirm()
+
+    # ═════════════════════════════════════════════════════════════════
+    # CÂMERA
+    # ═════════════════════════════════════════════════════════════════
     def _toggle_cam(self):
-        if not CV2_OK: self.add_log("⚠ mediapipe/opencv não instalados!","erro"); return
+        if not CV2_OK: self.add_log("mediapipe/opencv não instalado", "erro"); return
         if not self._cam_on: self._start_cam()
         else: self._stop_cam()
 
     def _start_cam(self):
-        if not self._ge.start(): self.add_log("⚠ Webcam não encontrada.","erro"); return
-        self._cam_on=True
-        self._cam_btn.config(text="  ■  PARAR  ",bg="#1a0008",fg=self.RED,
-                              activebackground=self.RED,activeforeground=self.BG)
-        self._cam_st.set("● ON"); self._cam_st_lbl.config(fg=self.GREEN)
-        self._status_var.set("◉  CÂMERA ATIVA  —  RECONHECENDO GESTOS")
-        self.add_log("✔ Câmera ativada.","gesto")
-        speak("Camera activated. Gesture control is now online, sir.",self)
-        threading.Thread(target=self._cam_loop,daemon=True).start()
+        if not self._detector.start():
+            self.add_log("Webcam não encontrada", "erro"); return
+        self._cam_on = True
+        self._cam_btn.setText("■  Parar câmera")
+        self._cam_btn.setStyleSheet(f"""
+            QPushButton {{
+                background:{DS.RED}22; color:{DS.RED}; border:1px solid {DS.RED}66;
+                border-radius:6px; font-size:11px; font-weight:600;
+            }}
+            QPushButton:hover {{ background:{DS.RED}44; }}
+        """)
+        self._cam_st.setText("● ao vivo")
+        self._cam_st.setStyleSheet(f"color:{DS.GREEN}; font-size:10px; font-weight:600; background:transparent;")
+        self._sb_lbl.setText("  Câmera ativa — gestos habilitados")
+        self._sb_lbl.setStyleSheet(f"color:{DS.GREEN}; font-size:10px; background:transparent;")
+        self.add_log("Câmera ativada — 3 gestos disponíveis", "gesto")
+        speak("Camera activated. Gesture control is now online, sir.", self)
+        threading.Thread(target=self._cam_loop, daemon=True).start()
 
     def _stop_cam(self):
-        self._cam_on=False; self._ge.stop()
-        self._cam_btn.config(text="  ▶  ATIVAR  ",bg=self.AC2,fg=self.AC,
-                              activebackground=self.AC,activeforeground=self.BG)
-        self._cam_st.set("● OFF"); self._cam_st_lbl.config(fg=self.RED)
-        self._status_var.set("◉  SISTEMA ONLINE  |  CÂMERA INATIVA")
-        self._cam_lbl.config(image="",text="[ CÂMERA DESLIGADA ]",fg=self.DIM)
-        self._gesto_var.set("GESTO: —")
-        self.add_log("■ Câmera desligada.","info")
-        speak("Camera deactivated, sir.",self)
+        self._cam_on = False; self._detector.stop()
+        self._cam_btn.setText("▶  Ativar Câmera")
+        self._cam_btn.setStyleSheet(f"""
+            QPushButton {{
+                background:{DS.BLUE_DIM}; color:{DS.BLUE}; border:1px solid {DS.BORDER_BLUE};
+                border-radius:6px; font-size:11px; font-weight:600;
+            }}
+            QPushButton:hover {{ background:{DS.BLUE_MID}22; border-color:{DS.BLUE}; }}
+        """)
+        self._cam_st.setText("● offline")
+        self._cam_st.setStyleSheet(f"color:{DS.RED}; font-size:10px; font-weight:600; background:transparent;")
+        self._cam_lbl.clear(); self._cam_lbl.setText("Câmera inativa")
+        self._gesture_chip.setText("—")
+        self._sb_lbl.setText("  Sistema online")
+        self._sb_lbl.setStyleSheet(f"color:{DS.T3}; font-size:10px; background:transparent;")
+        self.add_log("Câmera desativada", "info")
+        speak("Camera deactivated, sir.", self)
 
     def _cam_loop(self):
         while self._cam_on:
-            frame,right,left,cr,cl=self._ge.read()
+            frame, confirmed, raw = self._detector.read()
             if frame is None: time.sleep(0.04); continue
-            parts=[]
-            if right: parts.append(f"DIR:{right['g']}")
-            if left:  parts.append(f"ESQ:{left['g']}")
-            self.root.after(0,lambda p=" | ".join(parts) if parts else "—":
-                            self._gesto_var.set(f"GESTO: {p}"))
-            self.controller.process(right,left,cr,cl)
+            self.sig_gesture.emit(confirmed or "", raw or "")
             try:
-                sm=cv2.resize(frame,(360,260))
-                sm_rgb=cv2.cvtColor(sm,cv2.COLOR_BGR2RGB)
-                img=tk.PhotoImage(data=cv2.imencode('.ppm',cv2.cvtColor(sm_rgb,cv2.COLOR_RGB2BGR))[1].tobytes())
-                self.root.after(0,lambda i=img:self._upd_cam(i))
+                sm = cv2.resize(frame, (236, 148))
+                self.sig_cam_img.emit(sm)
             except: pass
             time.sleep(0.025)
 
-    def _upd_cam(self,img):
-        try: self._cam_lbl.config(image=img,text=""); self._cam_lbl._img=img
+    def _update_cam_pixmap(self, frame_bgr):
+        try:
+            rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb.shape
+            img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+            self._cam_lbl.setPixmap(QPixmap.fromImage(img).scaled(
+                self._cam_lbl.width(), self._cam_lbl.height(),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            ))
+            self._cam_lbl.setText("")
         except: pass
 
-    # ════════════════════════════════════════════════════
-    # MENU GESTUAL
-    # ════════════════════════════════════════════════════
-    def refresh_menu(self):
-        for i,btn in enumerate(self._menu_btns):
-            if i==self.menu_idx:
-                btn.config(bg=self.AC2,fg=self.AC,font=("Consolas",8,"bold"),relief="groove")
-            else:
-                btn.config(bg=self.PANEL,fg=self.TX,font=("Consolas",8),relief="flat")
+    # ═════════════════════════════════════════════════════════════════
+    # MENU (mantido para compatibilidade com gesto PINCH)
+    # ═════════════════════════════════════════════════════════════════
+    def refresh_menu(self): pass
 
     def menu_up(self):
-        self.menu_idx=(self.menu_idx-1)%len(self.MENU_ITEMS); self.refresh_menu()
+        self.menu_idx = (self.menu_idx - 1) % len(MENU_ITEMS)
+        self.add_log(f"Menu ↑ → {MENU_ITEMS[self.menu_idx][0]}", "gesto")
 
     def menu_down(self):
-        self.menu_idx=(self.menu_idx+1)%len(self.MENU_ITEMS); self.refresh_menu()
+        self.menu_idx = (self.menu_idx + 1) % len(MENU_ITEMS)
+        self.add_log(f"Menu ↓ → {MENU_ITEMS[self.menu_idx][0]}", "gesto")
 
     def menu_confirm(self):
-        label,mc=self.MENU_ITEMS[self.menu_idx]
-        self.add_log(f"GESTO CONFIRM › {label}","gesto")
+        lbl_t, mc = MENU_ITEMS[self.menu_idx]
+        self.add_log(f"Gesto confirm → {lbl_t}", "gesto")
         self._run(mc)
 
-    # ════════════════════════════════════════════════════
-    # UTILITÁRIOS
-    # ════════════════════════════════════════════════════
-    def highlight_mode(self,active):
-        for m,(f,lbl,color) in self._mode_frames.items():
-            if m==active: f.config(bg=color); lbl.config(bg=color,fg=self.BG)
-            else:         f.config(bg=self.DIM2); lbl.config(bg=self.PANEL,fg=self.DIM)
+    # ═════════════════════════════════════════════════════════════════
+    # UTILIDADES
+    # ═════════════════════════════════════════════════════════════════
+    def update_stats(self, info): self.sig_stats.emit(info)
+    def _apply_stats(self, info):
+        for k, lbl in self._stat_labels.items():
+            if k in info: lbl.setText(info[k])
 
-    def update_stats(self,info):
-        for k in ["cpu","ram","disk","bat","ip"]:
-            if k in self.stat_vars and k in info:
-                self.stat_vars[k].set(info[k])
+    def set_volume(self, pct): self.sig_volume.emit(pct)
+    def highlight_mode(self, _): pass  # compatibilidade
 
-    def add_log(self,text,tag=None):
-        def _i():
-            self.log.config(state="normal")
-            ts=datetime.datetime.now().strftime("%H:%M:%S")
-            self.log.insert("end",f"[{ts}]  ","info")
-            self.log.insert("end",text+"\n",tag or "")
-            self.log.see("end"); self.log.config(state="disabled")
-        self.root.after(0,_i)
+    def add_log(self, text, tag=""):
+        self.sig_log.emit(text, tag)
 
-    def _send(self,event=None):
-        q=self.entry.get().strip()
+    def _append_log(self, text, tag):
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        colors = {
+            "jarvis": DS.BLUE_BRIGHT, "user": DS.GREEN, "gesto": DS.CYAN,
+            "alerta": DS.YELLOW, "erro": DS.RED, "info": DS.T3,
+        }
+        color = colors.get(tag, DS.T2)
+        self._log.setTextColor(QColor(DS.T3))
+        self._log.append(f"[{ts}] ")
+        c = self._log.textCursor(); c.movePosition(QTextCursor.End); self._log.setTextCursor(c)
+        self._log.setTextColor(QColor(color))
+        self._log.insertPlainText(text)
+        self._log.moveCursor(QTextCursor.End)
+
+        if tag == "jarvis": self.sig_state.emit("speaking")
+        elif tag == "user": self.sig_state.emit("processing")
+
+    def _send(self):
+        q = self._entry.text().strip()
         if not q: return
-        self.entry.delete(0,"end")
-        self.add_log(f"VOCÊ › {q}","user")
-        resp=jarvis_response(q)
-        speak(resp,self)
-        threading.Thread(target=cmd,args=(q,self),daemon=True).start()
+        self._entry.clear()
+        self.add_log(f"YOU › {q}", "user")
+        speak(jarvis_response(q), self)
+        threading.Thread(target=cmd, args=(q, self), daemon=True).start()
 
-    def _run(self,action):
-        if callable(action): threading.Thread(target=action,daemon=True).start()
+    def _run(self, action):
+        if callable(action): threading.Thread(target=action, daemon=True).start()
         else:
-            self.add_log(f"CMD › {action}","user")
-            resp=jarvis_response(action)
-            speak(resp,self)
-            threading.Thread(target=cmd,args=(action,self),daemon=True).start()
+            self.add_log(f"CMD › {action}", "user")
+            speak(jarvis_response(action), self)
+            threading.Thread(target=cmd, args=(action, self), daemon=True).start()
 
     def _clock_tick(self):
-        now=datetime.datetime.now()
-        self.lbl_clock.config(text=now.strftime("%H:%M:%S"))
-        self.lbl_date.config( text=now.strftime("%d/%m/%Y — %A"))
-        self.root.after(1000,self._clock_tick)
+        n = datetime.datetime.now()
+        self._clock_lbl.setText(n.strftime("%H:%M:%S"))
+        self._date_lbl.setText(n.strftime("%d/%m · %a").upper())
 
     def _stats_tick(self):
-        info=sys_info(); self.update_stats(info)
-        self.root.after(5000,self._stats_tick)
+        self.update_stats(sys_info())
 
-    # ════════════════════════════════════════════════════
     def run(self):
-        self.add_log("⏳ Pré-gerando cache de voz JARVIS... aguarde.", "alerta")
+        self.add_log("Inicializando…", "info")
         def _boot():
-            # Espera o cache inicializar (máx 15s)
             _speak_ready.wait(timeout=15)
-            speak("JARVIS Gesture Master online. All modules loaded. Ready for your command, sir.", self)
+            speak("JARVIS online. All modules loaded. Ready for your command, sir.", self)
         threading.Thread(target=_boot, daemon=True).start()
-        self.root.mainloop()
+        self.show()
 
 
 # ═══════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    JarvisUI().run()
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    pal = QPalette()
+    pal.setColor(QPalette.Window,          QColor(DS.BG0))
+    pal.setColor(QPalette.WindowText,      QColor(DS.T1))
+    pal.setColor(QPalette.Base,            QColor(DS.BG1))
+    pal.setColor(QPalette.AlternateBase,   QColor(DS.BG2))
+    pal.setColor(QPalette.Text,            QColor(DS.T1))
+    pal.setColor(QPalette.Button,          QColor(DS.BG1))
+    pal.setColor(QPalette.ButtonText,      QColor(DS.T1))
+    pal.setColor(QPalette.Highlight,       QColor(DS.BLUE_DIM))
+    pal.setColor(QPalette.HighlightedText, QColor(DS.BLUE_BRIGHT))
+    pal.setColor(QPalette.Link,            QColor(DS.BLUE))
+    pal.setColor(QPalette.ToolTipBase,     QColor(DS.BG2))
+    pal.setColor(QPalette.ToolTipText,     QColor(DS.T1))
+    app.setPalette(pal)
+
+    ui = JarvisUI()
+    ui.run()
+    sys.exit(app.exec())
