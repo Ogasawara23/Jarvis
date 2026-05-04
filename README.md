@@ -1,84 +1,190 @@
-# Jarvis
-🤖 J.A.R.V.I.S — Gesture Master HUD v5.1
+🧠 J.A.R.V.I.S — Gesture Master HUD v5.2
+Sistema de assistente inteligente com controle por gestos de mão + voz, inspirado na interface do J.A.R.V.I.S..
+O projeto combina visão computacional, automação, interface gráfica e síntese de voz para criar uma experiência interativa em tempo real.
 
-Sistema avançado estilo JARVIS inspirado no universo do Homem de Ferro, com:
+🚀 Funcionalidades
 
-🎙️ Comandos de voz (PT-BR → resposta em inglês estilo JARVIS)
 
-🖐️ Controle por gestos com webcam
+✋ Reconhecimento de gestos em tempo real (via webcam)
 
-🖥️ Interface HUD futurista
 
-🔊 Voz neural realista (Microsoft Edge TTS)
+🧠 Integração com assistente inteligente (Jarvis)
 
-⚡ Automação do sistema (volume, apps, atalhos, etc)
 
-🚀 Tecnologias utilizadas
+🎙️ Reconhecimento de voz
 
-Python 3
 
-OpenCV (visão computacional)
+🔊 Síntese de fala (TTS)
 
-MediaPipe (detecção de mãos)
 
-Tkinter (interface gráfica)
+🖥️ Interface gráfica moderna (HUD)
 
-Edge TTS (voz neural)
 
-PyAutoGUI (controle do sistema)
+⌨️ Automação de teclado e mouse
 
-SpeechRecognition (voz)
 
-Pycaw (controle de áudio Windows)
+📊 Monitoramento do sistema
 
-📦 Instalação completa (PowerShell)
 
-Abra o PowerShell e execute:
 
-pip install mediapipe opencv-python numpy pyautogui
+🧩 Tecnologias utilizadas
 
-pip install SpeechRecognition psutil pywin32 pycaw comtypes
 
-pip install edge-tts pygame
+🐍 Python 3
 
-📚 Explicação das bibliotecas
 
-🖐️ Visão computacional
+👁️ OpenCV + MediaPipe
 
-mediapipe → Detecta mãos e gestos
 
-opencv-python → Captura e processa webcam
+🖼️ PySide6 (interface gráfica)
 
-numpy → Cálculos matemáticos
 
-🖱️ Automação do sistema
+🎤 SpeechRecognition
 
-pyautogui → Controla mouse, teclado e ações do sistema
 
-🎙️ Voz e áudio
+🔊 edge-tts / pyttsx3
 
-SpeechRecognition → Reconhece comandos de voz
 
-edge-tts → Gera voz estilo JARVIS (neural)
+🎮 pygame
 
-pygame → Reproduz áudio gerado
 
-💻 Sistema
+⚙️ psutil
 
-psutil → Informações do sistema (CPU, RAM, etc)
 
-pywin32 → Integração com Windows
+🤖 pyautogui
 
-pycaw + comtypes → Controle de volume do sistema
 
-⚙️ Requisitos
 
-Python 3.10+
+📦 Instalação (Ubuntu / Linux)
+1. Clone o projeto
+git clone <seu-repositorio>cd jarvis
+2. Crie o ambiente virtual
+python3 -m venv jarvis_envsource jarvis_env/bin/activate
+3. Instale dependências do sistema (IMPORTANTE)
+sudo apt updatesudo apt install portaudio19-dev python3-pyaudio -y
+4. Instale as dependências Python
+pip install -r requirements.txt
 
-Windows (recomendado)
+▶️ Execução
+python main.py
 
-Webcam
+🖐️ Sistema de Gestos
+Exemplos de comandos:
 
-Microfone
 
-Internet (necessário para voz com edge-tts)
+✋ Mão aberta → Ativar Jarvis
+
+
+✊ Punho fechado → Parar escuta
+
+
+👉 Apontar → Executar ação
+
+
+(Os gestos podem ser personalizados no código)
+
+🎙️ Sistema de Voz
+
+
+Usa SpeechRecognition para entrada
+
+
+Usa edge-tts ou pyttsx3 para saída
+
+
+Compatível com microfone padrão do sistema
+
+
+
+⚠️ Observações importantes
+
+
+Certifique-se de que sua webcam está funcionando
+
+
+Permissões de microfone devem estar habilitadas
+
+
+Em máquinas mais fracas, pode haver queda de FPS
+
+
+O uso de GPU pode melhorar o desempenho do MediaPipe
+
+
+
+🪟 Compatibilidade com Windows
+Algumas bibliotecas são específicas para Windows:
+
+
+pywin32
+
+
+pycaw
+
+
+comtypes
+
+
+Essas dependências:
+
+
+❌ Não devem ser instaladas no Linux
+
+
+✔️ São tratadas automaticamente no código via try/except
+
+
+
+📁 Estrutura esperada
+jarvis/├── main.py├── gesture_module.py├── jarvis_core.py├── requirements.txt└── assets/
+
+🧠 Arquitetura
+O sistema é dividido em:
+
+
+Gesture Module → Processa mãos via MediaPipe
+
+
+Jarvis Core → Lógica principal da IA
+
+
+HUD Interface → Interface visual
+
+
+Voice Engine → Entrada e saída de voz
+
+
+
+🔧 Melhorias futuras
+
+
+Integração com IA mais avançada (LLMs)
+
+
+Sistema de plugins
+
+
+Reconhecimento facial
+
+
+Comandos personalizados via UI
+
+
+Integração com IoT
+
+
+
+📜 Licença
+Este projeto é de uso educacional e experimental.
+
+Se quiser, posso dar o próximo passo e:
+
+
+deixar esse README com badge de GitHub,
+
+
+adicionar imagens da interface,
+
+
+ou montar um pitch estilo produto (nível startup) 🚀
+
