@@ -1,0 +1,42 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  J.A.R.V.I.S — Gesture Master HUD v5.2                         ║
+# ║  requirements.txt — Windows 10/11                              ║
+# ║                                                                ║
+# ║  Instalação:                                                   ║
+# ║    python -m venv jarvis_env                                   ║
+# ║    jarvis_env\Scripts\activate                                 ║
+# ║    pip install --upgrade pip                                   ║
+# ║    pip install -r requirementsWin.txt                             ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ── Interface gráfica ───────────────────────────────────────────────
+PySide6
+
+# ── Visão computacional + gestos ───────────────────────────────────
+opencv-python
+mediapipe==0.10.14
+numpy
+
+# ── Áudio e voz ────────────────────────────────────────────────────
+pygame
+elevenlabs
+pyttsx3
+requests
+PyAudio==0.2.14
+
+# ── Reconhecimento de voz ───────────────────────────────────────────
+SpeechRecognition
+
+# ── Automação de teclado e mouse ───────────────────────────────────
+pyautogui
+
+# ── Sistema / monitoramento ────────────────────────────────────────
+psutil
+
+# ── HTTP async ─────────────────────────────────────────────────────
+aiohttp
+
+# ── ESPECÍFICO WINDOWS ─────────────────────────────────────────────
+pywin32
+pycaw
+comtypes
